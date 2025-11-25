@@ -1,0 +1,7 @@
+{
+  "name": "Creative5 NTN Dongle ",
+  "description": "A Modbus RTU Master application for the NTN Dongle. Connects via Web Serial to monitor status, RSRP, SINR, and view real-time logs.",
+  "requestFramePermissions": [
+    "serial"
+  ]
+}
