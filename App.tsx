@@ -10,7 +10,6 @@ import {
   CommandLineIcon, 
   CpuChipIcon,
   FingerPrintIcon,
-  ExclamationTriangleIcon,
   QuestionMarkCircleIcon
 } from '@heroicons/react/24/outline';
 
