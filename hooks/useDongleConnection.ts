@@ -7,6 +7,7 @@ import { serial as polyfillSerial } from 'web-serial-polyfill';
 export const useDongleConnection = () => {
   const [connectionState, setConnectionState] = useState<ConnectionState>(ConnectionState.DISCONNECTED);
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [isReadLoopActive, setIsReadLoopActive] = useState(false);
   const [data, setData] = useState<DongleData>({
     modelName: '--',
     fwVersion: '--',
@@ -113,6 +114,7 @@ export const useDongleConnection = () => {
 
   const disconnect = async () => {
     addLog('SYS', 'Disconnecting...');
+    await stopReadLoop();
     await cleanupResources();
     setConnectionState(ConnectionState.DISCONNECTED);
     addLog('SYS', 'Disconnected');
@@ -361,6 +363,61 @@ export const useDongleConnection = () => {
     }
   };
 
+  const startReadLoop = async () => {
+    if (connectionState !== ConnectionState.CONNECTED || !portRef.current) {
+      addLog('SYS', 'Not connected to device', true);
+      return;
+    }
+
+    if (isReadLoopActive) {
+      addLog('SYS', 'Read loop already active');
+      return;
+    }
+
+    keepReadingRef.current = true;
+    setIsReadLoopActive(true);
+    addLog('SYS', 'Starting read loop...');
+
+    readLoopPromiseRef.current = readLoop();
+
+    setTimeout(() => {
+      if (keepReadingRef.current) initDongle();
+    }, 500);
+  };
+
+  const stopReadLoop = async () => {
+    if (!isReadLoopActive) {
+      addLog('SYS', 'Read loop not active');
+      return;
+    }
+
+    keepReadingRef.current = false;
+    setIsReadLoopActive(false);
+    addLog('SYS', 'Stopping read loop...');
+
+    if (pollIntervalRef.current) {
+      window.clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+
+    if (readerRef.current) {
+      try {
+        await readerRef.current.cancel();
+      } catch (e) {
+        console.debug('Reader cancel error:', e);
+      }
+    }
+
+    if (readLoopPromiseRef.current) {
+      try {
+        await readLoopPromiseRef.current;
+      } catch (e) {
+        console.debug('Read loop stop error:', e);
+      }
+      readLoopPromiseRef.current = null;
+    }
+  };
+
   const connect = async (mode: DriverMode) => {
     await cleanupResources();
 
@@ -399,16 +456,10 @@ export const useDongleConnection = () => {
       await port.open({ baudRate: MODBUS_CONSTANTS.BAUD_RATE });
       
       portRef.current = port;
-      keepReadingRef.current = true;
       setConnectionState(ConnectionState.CONNECTED);
       
-      addLog('SYS', `Connected using ${mode} mode.`);
-
-      readLoopPromiseRef.current = readLoop();
-      
-      setTimeout(() => {
-        if (keepReadingRef.current) initDongle();
-      }, 500);
+      addLog('SYS', `Serial connected using ${mode} mode.`);
+      addLog('SYS', 'Use Connect button to start communication.');
 
     } catch (err: any) {
       console.error(err);
@@ -437,6 +488,9 @@ export const useDongleConnection = () => {
     logs,
     clearLogs,
     data,
-    applyNTNConfig
+    applyNTNConfig,
+    isReadLoopActive,
+    startReadLoop,
+    stopReadLoop
   };
 };

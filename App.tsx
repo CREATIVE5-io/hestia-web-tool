@@ -15,16 +15,24 @@ import {
 } from '@heroicons/react/24/outline';
 
 const App: React.FC = () => {
-  const { connectionState, connect, disconnect, logs, clearLogs, data, applyNTNConfig } = useDongleConnection();
+  const { connectionState, connect, disconnect, logs, clearLogs, data, applyNTNConfig, isReadLoopActive, startReadLoop, stopReadLoop } = useDongleConnection();
   const [driverMode, setDriverMode] = useState<DriverMode>(DriverMode.AUTO);
 
   const isConnected = connectionState === ConnectionState.CONNECTED;
 
-  const handleConnect = () => {
+  const handleSerialConnect = () => {
     if (isConnected) {
       disconnect();
     } else {
       connect(driverMode);
+    }
+  };
+
+  const handleReadLoopToggle = () => {
+    if (isReadLoopActive) {
+      stopReadLoop();
+    } else {
+      startReadLoop();
     }
   };
 
@@ -69,14 +77,28 @@ const App: React.FC = () => {
             </div>
             
             <button
-              onClick={handleConnect}
-              className={`px-6 py-2.5 rounded-lg font-semibold transition-all shadow-lg hover:shadow-xl active:scale-95 ${
+              onClick={handleSerialConnect}
+              className={`px-4 py-2.5 rounded-lg font-semibold transition-all shadow-lg hover:shadow-xl active:scale-95 ${
                 isConnected
                   ? 'bg-red-500/10 text-red-400 border border-red-500/50 hover:bg-red-500/20'
                   : 'bg-blue-600 text-white hover:bg-blue-500 shadow-blue-500/20'
               }`}
             >
-              {isConnected ? 'Disconnect' : 'Connect'}
+              {isConnected ? 'Serial Disconnect' : 'Serial Connect'}
+            </button>
+
+            <button
+              onClick={handleReadLoopToggle}
+              disabled={!isConnected}
+              className={`px-4 py-2.5 rounded-lg font-semibold transition-all shadow-lg hover:shadow-xl active:scale-95 ${
+                !isConnected
+                  ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
+                  : isReadLoopActive
+                  ? 'bg-orange-500/10 text-orange-400 border border-orange-500/50 hover:bg-orange-500/20'
+                  : 'bg-green-600 text-white hover:bg-green-500 shadow-green-500/20'
+              }`}
+            >
+              {isReadLoopActive ? 'Disconnect' : 'Connect'}
             </button>
           </div>
         </header>
@@ -185,7 +207,7 @@ const App: React.FC = () => {
 
         {/* Footer */}
         <div className="text-center text-slate-600 text-sm py-4">
-           {isConnected ? (
+           {isConnected && isReadLoopActive ? (
              <span className="flex items-center justify-center gap-2">
                <span className="relative flex h-2 w-2">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
@@ -193,8 +215,10 @@ const App: React.FC = () => {
                 </span>
                 Live Polling (3s interval)
              </span>
+           ) : isConnected ? (
+             <span>Serial connected - Click Connect to start communication</span>
            ) : (
-             <span>Waiting for connection...</span>
+             <span>Waiting for serial connection...</span>
            )}
         </div>
 
