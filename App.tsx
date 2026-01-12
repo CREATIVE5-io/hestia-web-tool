@@ -163,9 +163,11 @@ const App: React.FC = () => {
             <DashboardCard title="NTN Dongle Status">
               <div className="flex flex-col space-y-1">
                 <StatusBadge label="Module AT Ready" active={data.status.moduleAtReady} />
-                <StatusBadge label="Downlink/IP Ready" active={data.status.downlinkReady} />
                 <StatusBadge label="SIM Ready" active={data.status.simReady} />
                 <StatusBadge label="Network Registered" active={data.status.networkRegistered} />
+                <StatusBadge label="IP Ready" active={data.status.downlinkReady} />
+                <StatusBadge label="Socket Ready" active={data.status.socketReady} />
+                <StatusBadge label="NTN Ready" active={data.status.moduleAtReady && data.status.simReady && data.status.networkRegistered && data.status.downlinkReady && data.status.socketReady} />
               </div>
             </DashboardCard>
           </div>

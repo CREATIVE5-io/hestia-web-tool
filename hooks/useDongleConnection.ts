@@ -16,7 +16,8 @@ export const useDongleConnection = () => {
       moduleAtReady: false,
       downlinkReady: false,
       simReady: false,
-      networkRegistered: false
+      networkRegistered: false,
+      socketReady: false
     },
     rsrp: '--',
     sinr: '--',
@@ -143,10 +144,12 @@ export const useDongleConnection = () => {
                 moduleAtReady: (val & 0x01) > 0,
                 downlinkReady: ((val & 0x02) >> 1) > 0,
                 simReady: ((val & 0x04) >> 2) > 0,
-                networkRegistered: ((val & 0x08) >> 3) > 0
+                networkRegistered: ((val & 0x08) >> 3) > 0,
+                socketReady: ((val & 0x10) >> 4) > 0
              };
              newState.status = statusObj;
-             parsedInfo = `Status: AT=${statusObj.moduleAtReady ? 'OK' : 'NO'}, DL=${statusObj.downlinkReady ? 'OK' : 'NO'}, SIM=${statusObj.simReady ? 'OK' : 'NO'}, NET=${statusObj.networkRegistered ? 'REG' : 'NO'}`;
+             const netStatus = val === 0x1F;
+             parsedInfo = `Status: AT=${statusObj.moduleAtReady ? 'OK' : 'NO'}, IP=${statusObj.downlinkReady ? 'OK' : 'NO'}, SIM=${statusObj.simReady ? 'OK' : 'NO'}, NET=${statusObj.networkRegistered ? 'REG' : 'NO'}, SOCK=${statusObj.socketReady ? 'OK' : 'NO'} (${netStatus ? 'ALL_READY' : 'PARTIAL'})`;
             break;
           }
           case 'RSRP': {

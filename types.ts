@@ -25,7 +25,7 @@ export interface DongleStatus {
   downlinkReady: boolean;
   simReady: boolean;
   networkRegistered: boolean;
-  socketReady?: boolean; // Only for UDP mode usually
+  socketReady: boolean;
 }
 
 export interface DongleData {
