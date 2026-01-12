@@ -36,6 +36,14 @@ export interface DongleData {
   rsrp: string;
   sinr: string;
   lastUpdated: number;
+  configApplied?: boolean;
+}
+
+export interface NTNConfig {
+  apn: string;
+  remoteIp: string;
+  remotePort: string;
+  localPort?: string;
 }
 
 export const MODBUS_CONSTANTS = {
@@ -54,6 +62,12 @@ export const MODBUS_CONSTANTS = {
   ADDR_IMSI: 0xEB00,
   ADDR_SINR: 0xEB13,
   ADDR_RSRP: 0xEB15,
+
+  // Configuration Addresses
+  ADDR_REMOTE_PORT: 0xC3B8,
+  ADDR_APN: 0xC3BB,
+  ADDR_REMOTE_IP: 0xC3CA,
+  ADDR_LOCAL_PORT: 0xC3D5,
 };
 
 // Web Serial API Type Definitions

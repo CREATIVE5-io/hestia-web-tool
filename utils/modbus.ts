@@ -82,3 +82,18 @@ export function parseModbusString(registers: number[]): string {
   // Trim null terminators or garbage
   return str.replace(/\0/g, '').trim();
 }
+
+export function stringToModbusRegisters(input: string): number[] {
+  // Pad with null byte if odd length
+  if (input.length % 2) {
+    input += '\x00';
+  }
+
+  const result: number[] = [];
+  for (let i = 0; i < input.length; i += 2) {
+    const pair = input.substring(i, i + 2);
+    const asciiVal = (pair.charCodeAt(0) << 8) | pair.charCodeAt(1);
+    result.push(asciiVal);
+  }
+  return result;
+}

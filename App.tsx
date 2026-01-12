@@ -4,6 +4,7 @@ import { ConnectionState, DriverMode } from './types';
 import { DashboardCard } from './components/DashboardCard';
 import { StatusBadge } from './components/StatusBadge';
 import { LogViewer } from './components/LogViewer';
+import { ConfigPanel } from './components/ConfigPanel';
 import { 
   SignalIcon, 
   WifiIcon, 
@@ -14,7 +15,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 const App: React.FC = () => {
-  const { connectionState, connect, disconnect, logs, clearLogs, data } = useDongleConnection();
+  const { connectionState, connect, disconnect, logs, clearLogs, data, applyNTNConfig } = useDongleConnection();
   const [driverMode, setDriverMode] = useState<DriverMode>(DriverMode.AUTO);
 
   const isConnected = connectionState === ConnectionState.CONNECTED;
@@ -93,44 +94,52 @@ const App: React.FC = () => {
         )}
 
         {/* Main Dashboard Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-6">
           
-          {/* Column 1: Device Info & Status */}
+          {/* Column 1: Configuration Panel */}
+          <div className="space-y-6">
+            <ConfigPanel
+              onApplyConfig={applyNTNConfig}
+              isConnected={isConnected}
+            />
+          </div>
+
+          {/* Column 2: Device Info & Status */}
           <div className="space-y-6">
             <DashboardCard title="Device Information">
-              <div className="space-y-4">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-slate-700 rounded-lg">
-                    <CpuChipIcon className="w-5 h-5 text-slate-300" />
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 bg-slate-700 rounded">
+                    <CpuChipIcon className="w-4 h-4 text-slate-300" />
                   </div>
                   <div>
                     <div className="text-xs text-slate-500">Model Name</div>
-                    <div className="font-mono text-lg text-white">{data.modelName}</div>
+                    <div className="font-mono text-sm text-white">{data.modelName}</div>
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-slate-700 rounded-lg">
-                    <CommandLineIcon className="w-5 h-5 text-slate-300" />
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 bg-slate-700 rounded">
+                    <CommandLineIcon className="w-4 h-4 text-slate-300" />
                   </div>
                   <div>
                     <div className="text-xs text-slate-500">Firmware Version</div>
-                    <div className="font-mono text-lg text-white">{data.fwVersion}</div>
+                    <div className="font-mono text-sm text-white">{data.fwVersion}</div>
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-slate-700 rounded-lg">
-                    <FingerPrintIcon className="w-5 h-5 text-slate-300" />
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 bg-slate-700 rounded">
+                    <FingerPrintIcon className="w-4 h-4 text-slate-300" />
                   </div>
                   <div>
                     <div className="text-xs text-slate-500">IMSI</div>
-                    <div className="font-mono text-lg text-white">{data.imsi}</div>
+                    <div className="font-mono text-sm text-white">{data.imsi}</div>
                   </div>
                 </div>
               </div>
             </DashboardCard>
 
             <DashboardCard title="NTN Dongle Status">
-              <div className="flex flex-col">
+              <div className="flex flex-col space-y-1">
                 <StatusBadge label="Module AT Ready" active={data.status.moduleAtReady} />
                 <StatusBadge label="Downlink/IP Ready" active={data.status.downlinkReady} />
                 <StatusBadge label="SIM Ready" active={data.status.simReady} />
@@ -139,36 +148,36 @@ const App: React.FC = () => {
             </DashboardCard>
           </div>
 
-          {/* Column 2: Signal Metrics */}
-          <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6 h-fit">
+          {/* Column 3-4: Signal Metrics */}
+          <div className="xl:col-span-2 lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6 h-fit">
             <DashboardCard title="Signal Strength (RSRP)" className="h-full">
-               <div className="flex flex-col items-center justify-center py-6">
-                 <SignalIcon className={`w-12 h-12 mb-2 ${
+               <div className="flex flex-col items-center justify-center py-4">
+                 <SignalIcon className={`w-10 h-10 mb-2 ${
                    data.rsrp !== '--' && parseInt(data.rsrp) > -100 ? 'text-green-500' : 'text-slate-600'
                  }`} />
-                 <div className="text-5xl font-bold text-white tracking-tighter">
-                   {data.rsrp} <span className="text-lg text-slate-500 font-normal">dBm</span>
+                 <div className="text-3xl font-bold text-white tracking-tighter">
+                   {data.rsrp} <span className="text-sm text-slate-500 font-normal">dBm</span>
                  </div>
-                 <div className="mt-2 text-sm text-slate-500">Reference Signal Received Power</div>
+                 <div className="mt-1 text-xs text-slate-500 text-center">Reference Signal Received Power</div>
                </div>
             </DashboardCard>
 
             <DashboardCard title="Signal Quality (SINR)" className="h-full">
-               <div className="flex flex-col items-center justify-center py-6">
-                 <div className="w-12 h-12 rounded-full border-4 border-slate-700 flex items-center justify-center mb-2">
-                    <div className={`w-3 h-3 rounded-full ${
+               <div className="flex flex-col items-center justify-center py-4">
+                 <div className="w-10 h-10 rounded-full border-4 border-slate-700 flex items-center justify-center mb-2">
+                    <div className={`w-2 h-2 rounded-full ${
                       data.sinr !== '--' && parseInt(data.sinr) > 5 ? 'bg-green-500' : 'bg-slate-600'
                     }`} />
                  </div>
-                 <div className="text-5xl font-bold text-white tracking-tighter">
-                   {data.sinr} <span className="text-lg text-slate-500 font-normal">dB</span>
+                 <div className="text-3xl font-bold text-white tracking-tighter">
+                   {data.sinr} <span className="text-sm text-slate-500 font-normal">dB</span>
                  </div>
-                 <div className="mt-2 text-sm text-slate-500">Signal-to-Interference-plus-Noise Ratio</div>
+                 <div className="mt-1 text-xs text-slate-500 text-center">Signal-to-Interference-plus-Noise Ratio</div>
                </div>
             </DashboardCard>
             
             {/* Log Section spans full width of this column */}
-            <div className="md:col-span-2 h-96">
+            <div className="md:col-span-2 h-80">
                <LogViewer logs={logs} onClear={clearLogs} />
             </div>
           </div>

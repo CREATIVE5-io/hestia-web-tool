@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { ConnectionState, LogEntry, DongleData, MODBUS_CONSTANTS, SerialPort, DriverMode } from '../types';
-import { buildReadInputRegisters, buildWriteMultipleRegisters, hexString, parseModbusString } from '../utils/modbus';
+import { ConnectionState, LogEntry, DongleData, MODBUS_CONSTANTS, SerialPort, DriverMode, NTNConfig } from '../types';
+import { buildReadInputRegisters, buildWriteMultipleRegisters, hexString, parseModbusString, stringToModbusRegisters } from '../utils/modbus';
 // @ts-ignore - The polyfill types aren't always perfect, ignore for build safety
 import { serial as polyfillSerial } from 'web-serial-polyfill';
 
@@ -19,7 +19,8 @@ export const useDongleConnection = () => {
     },
     rsrp: '--',
     sinr: '--',
-    lastUpdated: 0
+    lastUpdated: 0,
+    configApplied: false
   });
 
   const portRef = useRef<SerialPort | null>(null);
@@ -302,6 +303,64 @@ export const useDongleConnection = () => {
     }, 3000); 
   };
 
+  const applyNTNConfig = async (config: NTNConfig): Promise<void> => {
+    if (!keepReadingRef.current || !unlockVerifiedRef.current) {
+      throw new Error('Device not ready for configuration');
+    }
+
+    addLog('SYS', 'Applying NTN Configuration...');
+
+    try {
+      // Set Remote Port
+      const remotePortData = stringToModbusRegisters(config.remotePort);
+      await sendModbusRequest(buildWriteMultipleRegisters(
+        MODBUS_CONSTANTS.SLAVE_ID,
+        MODBUS_CONSTANTS.ADDR_REMOTE_PORT,
+        remotePortData
+      ));
+      await sleep(200);
+      addLog('SYS', `Remote Port set: ${config.remotePort}`);
+
+      // Set APN
+      const apnData = stringToModbusRegisters(config.apn);
+      await sendModbusRequest(buildWriteMultipleRegisters(
+        MODBUS_CONSTANTS.SLAVE_ID,
+        MODBUS_CONSTANTS.ADDR_APN,
+        apnData
+      ));
+      await sleep(200);
+      addLog('SYS', `APN set: ${config.apn}`);
+
+      // Set Remote IP
+      const remoteIpData = stringToModbusRegisters(config.remoteIp);
+      await sendModbusRequest(buildWriteMultipleRegisters(
+        MODBUS_CONSTANTS.SLAVE_ID,
+        MODBUS_CONSTANTS.ADDR_REMOTE_IP,
+        remoteIpData
+      ));
+      await sleep(200);
+      addLog('SYS', `Remote IP set: ${config.remoteIp}`);
+
+      // Set Local Port (default to 55001 if not provided)
+      const localPort = config.localPort || '55001';
+      const localPortData = stringToModbusRegisters(localPort);
+      await sendModbusRequest(buildWriteMultipleRegisters(
+        MODBUS_CONSTANTS.SLAVE_ID,
+        MODBUS_CONSTANTS.ADDR_LOCAL_PORT,
+        localPortData
+      ));
+      await sleep(200);
+      addLog('SYS', `Local Port set: ${localPort}`);
+
+      setData(prev => ({ ...prev, configApplied: true }));
+      addLog('SYS', 'Configuration applied successfully!');
+
+    } catch (error) {
+      addLog('SYS', `Configuration failed: ${error}`, true);
+      throw error;
+    }
+  };
+
   const connect = async (mode: DriverMode) => {
     await cleanupResources();
 
@@ -377,6 +436,7 @@ export const useDongleConnection = () => {
     disconnect,
     logs,
     clearLogs,
-    data
+    data,
+    applyNTNConfig
   };
 };
