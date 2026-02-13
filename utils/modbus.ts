@@ -67,7 +67,24 @@ export function buildWriteMultipleRegisters(slaveId: number, startAddr: number, 
 export function hexString(data: Uint8Array | number[]): string {
   return Array.from(data)
     .map(b => b.toString(16).padStart(2, '0').toUpperCase())
-    .join(' ');
+    .join('');
+}
+
+/**
+ * Convert bytes to a readable format showing both hex and ASCII
+ * For logging purposes - shows hex without spaces and ASCII representation
+ */
+export function hexStringWithASCII(data: Uint8Array | number[]): string {
+  const hex = hexString(data);
+  const ascii = Array.from(data)
+    .map(b => {
+      if (b >= 32 && b <= 126) {
+        return String.fromCharCode(b);
+      }
+      return '.';
+    })
+    .join('');
+  return `${hex}\n${ascii}`;
 }
 
 export function parseModbusString(registers: number[]): string {
@@ -96,4 +113,108 @@ export function stringToModbusRegisters(input: string): number[] {
     result.push(asciiVal);
   }
   return result;
+}
+
+/**
+ * Convert AT command string to Modbus register values
+ * Appends \r\n and converts to register pairs
+ */
+export function atCommandToModbusRegisters(command: string): number[] {
+  const atCmd = command + '\r\n';
+  return stringToModbusRegisters(atCmd);
+}
+
+/**
+ * Convert register values to ASCII codes array
+ * Each register is split into high byte and low byte
+ */
+export function registersToAsciiCodes(registers: number[]): number[] {
+  const asciiCodes: number[] = [];
+  for (const reg of registers) {
+    const highByte = (reg >> 8) & 0xFF;
+    const lowByte = reg & 0xFF;
+    asciiCodes.push(highByte);
+    asciiCodes.push(lowByte);
+  }
+  return asciiCodes;
+}
+
+/**
+ * Extract quoted string from ASCII codes array (for BISGET responses)
+ * Finds first and second occurrence of ASCII code 34 (double quote)
+ */
+export function extractQuotedString(asciiCodes: number[]): string {
+  try {
+    const idx_1st = asciiCodes.indexOf(34);
+    if (idx_1st === -1) return '';
+    
+    const idx_2nd = asciiCodes.indexOf(34, idx_1st + 1);
+    if (idx_2nd === -1) return '';
+    
+    const quotedCodes = asciiCodes.slice(idx_1st + 1, idx_2nd);
+    return String.fromCharCode(...quotedCodes);
+  } catch (e) {
+    console.error('Error extracting quoted string:', e);
+    return '';
+  }
+}
+
+export function generateModbusFrame(command: string, slaveId: number = 1): Uint8Array {
+  // Convert AT command to Modbus registers
+  const registers = stringToModbusRegisters(command);
+  // Build write multiple registers frame for command execution
+  return buildWriteMultipleRegisters(slaveId, 0xC700, registers);
+}
+
+/**
+ * Parse Modbus Read Input Registers response
+ * Response format: [SlaveID] [FuncCode=0x04] [ByteCount] [Data...] [CRC_LO] [CRC_HI]
+ * Returns: { registers: number[], success: boolean }
+ */
+export function parseReadInputRegistersResponse(response: Uint8Array): { registers: number[]; success: boolean } {
+  if (response.length < 5) {
+    return { registers: [], success: false };
+  }
+  
+  const funcCode = response[1];
+  if (funcCode !== 0x04) {
+    return { registers: [], success: false };
+  }
+  
+  const byteCount = response[2];
+  if (response.length < 3 + byteCount + 2) {
+    return { registers: [], success: false };
+  }
+  
+  const dataBytes = response.slice(3, 3 + byteCount);
+  const registers: number[] = [];
+  
+  for (let i = 0; i < dataBytes.length; i += 2) {
+    if (i + 1 < dataBytes.length) {
+      registers.push((dataBytes[i] << 8) | dataBytes[i + 1]);
+    }
+  }
+  
+  return { registers, success: true };
+}
+
+/**
+ * Parse Modbus Write Multiple Registers response (echo)
+ * Response format: [SlaveID] [FuncCode=0x10] [StartAddr_HI] [StartAddr_LO] [Quantity_HI] [Quantity_LO] [CRC_LO] [CRC_HI]
+ * Returns: { success: boolean, startAddr: number, quantity: number }
+ */
+export function parseWriteMultipleRegistersResponse(response: Uint8Array): { success: boolean; startAddr: number; quantity: number } {
+  if (response.length < 8) {
+    return { success: false, startAddr: 0, quantity: 0 };
+  }
+  
+  const funcCode = response[1];
+  if (funcCode !== 0x10) {
+    return { success: false, startAddr: 0, quantity: 0 };
+  }
+  
+  const startAddr = (response[2] << 8) | response[3];
+  const quantity = (response[4] << 8) | response[5];
+  
+  return { success: true, startAddr, quantity };
 }

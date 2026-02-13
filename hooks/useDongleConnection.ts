@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { ConnectionState, LogEntry, DongleData, MODBUS_CONSTANTS, SerialPort, DriverMode, NTNConfig } from '../types';
-import { buildReadInputRegisters, buildWriteMultipleRegisters, hexString, parseModbusString, stringToModbusRegisters } from '../utils/modbus';
+import { ConnectionState, LogEntry, DongleData, MODBUS_CONSTANTS, SerialPort, DriverMode, NTNConfig, PCIE2CommandResult } from '../types';
+import { buildReadInputRegisters, buildWriteMultipleRegisters, hexString, parseModbusString, stringToModbusRegisters, atCommandToModbusRegisters, parseReadInputRegistersResponse } from '../utils/modbus';
 // @ts-ignore - The polyfill types aren't always perfect, ignore for build safety
 import { serial as polyfillSerial } from 'web-serial-polyfill';
 
@@ -32,6 +32,13 @@ export const useDongleConnection = () => {
   const readLoopPromiseRef = useRef<Promise<void> | null>(null);
   const lastCommandRef = useRef<string | null>(null);
   const unlockVerifiedRef = useRef<boolean>(false);
+  const pcie2ResponseRef = useRef<{ length: number; data: Uint8Array | null }>({ length: 0, data: null });
+  const isClosingRef = useRef<boolean>(false);
+  
+  // Response queue for request/response matching - supports multiple pending requests
+  const responseResolveQueueRef = useRef<Array<(data: Uint8Array) => void>>([]);
+  const responseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const responseBufferRef = useRef<Uint8Array>(new Uint8Array(0));
 
   const addLog = useCallback((direction: 'TX' | 'RX' | 'SYS', message: string, isError = false) => {
     setLogs(prev => {
@@ -52,6 +59,13 @@ export const useDongleConnection = () => {
 
   // Safe cleanup helper
   const cleanupResources = async () => {
+    // Prevent multiple simultaneous close operations
+    if (isClosingRef.current) {
+      console.debug('Close already in progress, skipping');
+      return;
+    }
+    isClosingRef.current = true;
+
     keepReadingRef.current = false;
 
     if (pollIntervalRef.current) {
@@ -83,10 +97,12 @@ export const useDongleConnection = () => {
       try {
         await portRef.current.close();
       } catch (e) {
-        console.warn('Port close error:', e);
+        console.debug('Port close error (ignoring):', e);
       }
       portRef.current = null;
     }
+
+    isClosingRef.current = false;
   };
 
   // Cleanup on unmount
@@ -108,14 +124,55 @@ export const useDongleConnection = () => {
     }
   };
 
-  const sendModbusRequest = async (request: Uint8Array): Promise<Uint8Array | null> => {
+  const sendModbusRequest = async (request: Uint8Array, timeout: number = 2000): Promise<Uint8Array | null> => {
     await writeBytes(request);
-    return null; 
+    
+    // Check if read loop is active
+    if (!keepReadingRef.current) {
+      addLog('SYS', 'Warning: Read loop not active, response may not be captured', true);
+    }
+    
+    // Wait for response with timeout
+    return new Promise((resolve) => {
+      const resolver = (data: Uint8Array) => {
+        // Remove this resolver from queue
+        const idx = responseResolveQueueRef.current.indexOf(resolver);
+        if (idx !== -1) {
+          responseResolveQueueRef.current.splice(idx, 1);
+        }
+        if (responseTimeoutRef.current) {
+          clearTimeout(responseTimeoutRef.current);
+          responseTimeoutRef.current = null;
+        }
+        resolve(data);
+      };
+      
+      // Add resolver to queue
+      responseResolveQueueRef.current.push(resolver);
+      
+      responseTimeoutRef.current = window.setTimeout(() => {
+        responseTimeoutRef.current = null;
+        // Remove from queue if still there
+        const idx = responseResolveQueueRef.current.indexOf(resolver);
+        if (idx !== -1) {
+          responseResolveQueueRef.current.splice(idx, 1);
+        }
+        addLog('SYS', 'Modbus response timeout (no data received)', true);
+        resolve(null);
+      }, timeout);
+    });
   };
 
   const disconnect = async () => {
     addLog('SYS', 'Disconnecting...');
-    await stopReadLoop();
+    
+    // Stop read loop first if active
+    if (isReadLoopActive) {
+      await stopReadLoop();
+      // Wait for operations to complete
+      await new Promise(r => setTimeout(r, 300));
+    }
+    
     await cleanupResources();
     setConnectionState(ConnectionState.DISCONNECTED);
     addLog('SYS', 'Disconnected');
@@ -182,6 +239,19 @@ export const useDongleConnection = () => {
             parsedInfo = `IMSI: ${val}`;
             break;
           }
+          case 'PCIE2_LENGTH': {
+            // Extract response length from first register
+            const length = registers[0] || 0;
+            pcie2ResponseRef.current.length = length;
+            parsedInfo = `PCIE2 Response Length: ${length} bytes`;
+            break;
+          }
+          case 'PCIE2_DATA': {
+            // Store raw response data for later conversion
+            pcie2ResponseRef.current.data = dataBytes;
+            parsedInfo = `PCIE2 Response Data: ${dataBytes.length} bytes received`;
+            break;
+          }
           case 'VERIFY_INIT': {
              const val = parseModbusString(registers);
              if (val && val.length > 0) {
@@ -213,11 +283,48 @@ export const useDongleConnection = () => {
         const { value, done } = await readerRef.current.read();
         if (done) break;
         if (value) {
-          const parsedStr = processIncomingDataWithContext(value);
-          const logMsg = parsedStr 
-            ? `${hexString(value)} | ${parsedStr}` 
-            : hexString(value);
-          addLog('RX', logMsg);
+          // Accumulate data in buffer
+          const combined = new Uint8Array(responseBufferRef.current.length + value.length);
+          combined.set(responseBufferRef.current);
+          combined.set(value, responseBufferRef.current.length);
+          responseBufferRef.current = combined;
+          
+          // Check if we have a complete Modbus frame
+          if (responseBufferRef.current.length >= 5) {
+            const funcCode = responseBufferRef.current[1];
+            let expectedLength = 0;
+            
+            if (funcCode === 0x04) { // Read Input Registers
+              const byteCount = responseBufferRef.current[2];
+              expectedLength = 3 + byteCount + 2; // header + data + CRC
+            } else if (funcCode === 0x10) { // Write Multiple Registers
+              expectedLength = 8; // fixed length
+            }
+            
+            // If we have complete frame, dispatch it
+            if (expectedLength > 0 && responseBufferRef.current.length >= expectedLength) {
+              const completeFrame = responseBufferRef.current.slice(0, expectedLength);
+              responseBufferRef.current = responseBufferRef.current.slice(expectedLength);
+              
+              // Dispatch to pending response handler
+              if (responseResolveQueueRef.current.length > 0) {
+                const resolver = responseResolveQueueRef.current.shift();
+                if (resolver) {
+                  resolver(completeFrame);
+                }
+              }
+              
+              // Process for context-based parsing
+              const parsedStr = processIncomingDataWithContext(completeFrame);
+              const ascii = Array.from(completeFrame)
+                .map(b => (b >= 32 && b <= 126) ? String.fromCharCode(b) : '.')
+                .join('');
+              const logMsg = parsedStr 
+                ? `${hexString(completeFrame)} (${ascii}) | ${parsedStr}` 
+                : `${hexString(completeFrame)} (${ascii})`;
+              addLog('RX', logMsg);
+            }
+          }
         }
       }
     } catch (error) {
@@ -366,7 +473,211 @@ export const useDongleConnection = () => {
     }
   };
 
-  const startReadLoop = async () => {
+  /**
+   * PCIE2 CMD: Send AT command to PCIe2 module
+   * Follows the protocol:
+   * 1. Write command to PCIE2_CMD_START (0xC700)
+   * 2. Wait for response (1-5 seconds depending on command)
+   * 3. Read response length from PCIE2_MOD_LEN (0xF860) or PCIE2_DATA_LEN (0xF460)
+   * 4. Read response data starting from PCIE2_MOD_START (0xF861) or PCIE2_DATA_START (0xF461)
+   */
+  const sendPCIE2Command = async (command: string, maxRetries: number = 10): Promise<PCIE2CommandResult> => {
+    addLog('SYS', `PCIE2 CMD: Sending "${command}"`);
+
+    try {
+      // Diagnostic: Check if read loop is active
+      if (!keepReadingRef.current) {
+        addLog('SYS', 'WARNING: Read loop is not active. Start it before sending PCIE2 commands.', true);
+      }
+      
+      // Step 1: Write AT command to PCIE2_CMD_START
+      const atCmdRegisters = atCommandToModbusRegisters(command);
+      const cmdFrame = buildWriteMultipleRegisters(
+        MODBUS_CONSTANTS.SLAVE_ID,
+        MODBUS_CONSTANTS.PCIE2_CMD_START,
+        atCmdRegisters
+      );
+      
+      const cmdResponse = await sendModbusRequest(cmdFrame, 1000);
+      if (cmdResponse) {
+        addLog('SYS', `PCIE2 CMD: Command write acknowledged`);
+      }
+      
+      // Step 2: Determine wait time and response register addresses
+      let waitTime = 3000;
+      let respLenReg = MODBUS_CONSTANTS.PCIE2_MOD_LEN;
+      let respDataReg = MODBUS_CONSTANTS.PCIE2_MOD_START;
+
+      if (command === 'ATZ') {
+        waitTime = 5000;
+      } else if (command.includes('AT+BISGET=')) {
+        waitTime = 1000;
+        respLenReg = MODBUS_CONSTANTS.PCIE2_DATA_LEN;
+        respDataReg = MODBUS_CONSTANTS.PCIE2_DATA_START;
+      }
+
+      addLog('SYS', `PCIE2 CMD: Waiting ${waitTime}ms for device to process...`);
+      await sleep(waitTime);
+
+      // Step 3: Poll for response length (retry if needed)
+      let dataLength = 0;
+      let retries = 0;
+
+      while (retries < maxRetries && dataLength === 0) {
+        const lenResponse = await sendModbusRequest(buildReadInputRegisters(
+          MODBUS_CONSTANTS.SLAVE_ID,
+          respLenReg,
+          1
+        ), 1000);
+        
+        if (lenResponse) {
+          const parsed = parseReadInputRegistersResponse(lenResponse);
+          if (parsed.success && parsed.registers.length > 0) {
+            dataLength = parsed.registers[0];
+            addLog('SYS', `PCIE2 CMD: Response length = ${dataLength} bytes`);
+          } else {
+            addLog('SYS', `PCIE2 CMD: Parse failed for response (retry ${retries + 1}/${maxRetries})`);
+          }
+        } else {
+          addLog('SYS', `PCIE2 CMD: No response for length query (retry ${retries + 1}/${maxRetries})`);
+        }
+        
+        retries++;
+        
+        if (retries < maxRetries && dataLength === 0) {
+          addLog('SYS', `PCIE2 CMD: Waiting for data (attempt ${retries}/${maxRetries})...`);
+          await sleep(200);
+        }
+      }
+
+      // Step 4: Read response data if length > 0
+      let responseData = '';
+      if (dataLength > 0) {
+        addLog('SYS', `PCIE2 CMD: Reading ${dataLength} bytes of response data...`);
+        
+        const numRegisters = dataLength;
+        
+        const dataResponse = await sendModbusRequest(buildReadInputRegisters(
+          MODBUS_CONSTANTS.SLAVE_ID,
+          respDataReg,
+          numRegisters
+        ), 2000);
+        
+        // Convert response data to string
+        if (dataResponse) {
+          const parsed = parseReadInputRegistersResponse(dataResponse);
+          if (parsed.success && parsed.registers.length > 0) {
+            // Each register contains 2 bytes (hi and lo)
+            const dataBytes: number[] = [];
+            for (const reg of parsed.registers) {
+              dataBytes.push((reg >> 8) & 0xFF);
+              dataBytes.push(reg & 0xFF);
+            }
+            responseData = dataBytes.slice(0, dataLength*2)
+              .map(byte => String.fromCharCode(byte))
+              .join('');
+            
+            // Parse value from response (e.g., "RX Frequency: 923200000\r\n\r\nOK")
+            const match = responseData.match(/:\s*(\S+)/);
+            if (match) {
+              responseData = match[1];
+            }
+            
+            addLog('SYS', `PCIE2 CMD: Response received: ${responseData}`);
+          }
+        }
+      }
+
+      addLog('SYS', `PCIE2 CMD: Completed successfully`);
+      
+      return {
+        success: true,
+        data: responseData || 'OK',
+        dataLength: dataLength,
+      };
+
+    } catch (error) {
+      const errorMsg = `PCIE2 CMD failed: ${error}`;
+      addLog('SYS', errorMsg, true);
+      return { success: false, data: null, dataLength: 0, error: errorMsg };
+    }
+  };
+
+  /**
+   * Test LoRa AT commands
+   * Sends query commands to get frequency, spreading factor, and channel plan
+   */
+  const testLoRaCommands = async (): Promise<void> => {
+    try {
+      addLog('SYS', 'Testing LoRa AT commands...');
+      
+      // Check if read loop is running
+      if (!keepReadingRef.current) {
+        addLog('SYS', 'Starting read loop for LoRa tests...');
+        keepReadingRef.current = true;
+        setIsReadLoopActive(true);
+        readLoopPromiseRef.current = readLoop();
+        
+        // Wait for reader to be acquired
+        let attempts = 0;
+        while (attempts < 20 && !readerRef.current) {
+          await new Promise(r => setTimeout(r, 100));
+          attempts++;
+        }
+        
+        if (!readerRef.current) {
+          throw new Error('Failed to start read loop');
+        }
+        addLog('SYS', 'Read loop is now listening');
+      }
+
+      // Test 1: Frequency command
+      addLog('SYS', 'Test 1: AT+BISRXF=?');
+      const freqResult = await sendPCIE2Command('AT+BISRXF=?');
+      if (freqResult.success && freqResult.data) {
+        addLog('SYS', `Frequency response: ${freqResult.data}`);
+      } else {
+        addLog('SYS', 'Frequency query failed', true);
+      }
+      await sleep(500);
+
+      // Test 2: Spreading Factor command
+      addLog('SYS', 'Test 2: AT+BISRXSF=?');
+      const sfResult = await sendPCIE2Command('AT+BISRXSF=?');
+      if (sfResult.success && sfResult.data) {
+        addLog('SYS', `Spreading Factor response: ${sfResult.data}`);
+      } else {
+        addLog('SYS', 'Spreading Factor query failed', true);
+      }
+      await sleep(500);
+
+      // Test 3: Channel Plan command
+      addLog('SYS', 'Test 3: AT+BISCHPLAN=?');
+      const chResult = await sendPCIE2Command('AT+BISCHPLAN=?');
+      if (chResult.success && chResult.data) {
+        addLog('SYS', `Channel Plan response: ${chResult.data}`);
+      } else {
+        addLog('SYS', 'Channel Plan query failed', true);
+      }
+
+      addLog('SYS', 'LoRa command tests completed');
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+      addLog('SYS', `LoRa test error: ${errorMsg}`, true);
+    }
+  };
+
+  /**
+   * Read PCIE2 response data after command completion
+   * Should be called after sendPCIE2Command completes
+   * @deprecated Use sendPCIE2Command instead which handles response internally
+   */
+  const readPCIE2Response = async (): Promise<string | null> => {
+    // This function is deprecated - sendPCIE2Command now handles responses internally
+    return null;
+  };
+
+  const startReadLoop = useCallback(async () => {
     if (connectionState !== ConnectionState.CONNECTED || !portRef.current) {
       addLog('SYS', 'Not connected to device', true);
       return;
@@ -383,10 +694,55 @@ export const useDongleConnection = () => {
 
     readLoopPromiseRef.current = readLoop();
 
-    setTimeout(() => {
-      if (keepReadingRef.current) initDongle();
-    }, 500);
-  };
+    // Wait for reader to be acquired before proceeding with init
+    let attempts = 0;
+    while (attempts < 20 && !readerRef.current) {
+      await new Promise(r => setTimeout(r, 100));
+      attempts++;
+    }
+
+    if (readerRef.current) {
+      addLog('SYS', 'Read loop is now listening, initializing device...');
+      if (keepReadingRef.current) await initDongle();
+    } else {
+      addLog('SYS', 'Warning: Read loop started but reader not ready', true);
+    }
+  }, [connectionState, isReadLoopActive, addLog, readLoop, initDongle]);
+
+  /**
+   * Start read loop WITHOUT full device initialization
+   * Use this for LoRa PCIE2 commands when device is already initialized
+   */
+  const startReadLoopOnly = useCallback(async () => {
+    if (connectionState !== ConnectionState.CONNECTED || !portRef.current) {
+      addLog('SYS', 'Not connected to device', true);
+      return;
+    }
+
+    if (isReadLoopActive) {
+      addLog('SYS', 'Read loop already active');
+      return;
+    }
+
+    keepReadingRef.current = true;
+    setIsReadLoopActive(true);
+    addLog('SYS', 'Starting read loop (monitoring only)...');
+
+    readLoopPromiseRef.current = readLoop();
+    
+    // Wait for reader to be acquired (up to 2 seconds)
+    let attempts = 0;
+    while (attempts < 20 && !readerRef.current) {
+      await new Promise(r => setTimeout(r, 100));
+      attempts++;
+    }
+    
+    if (readerRef.current) {
+      addLog('SYS', 'Read loop is now listening for responses');
+    } else {
+      addLog('SYS', 'Warning: Read loop started but reader not ready yet', true);
+    }
+  }, [connectionState, isReadLoopActive, addLog, readLoop]);
 
   const stopReadLoop = async () => {
     if (!isReadLoopActive) {
@@ -456,12 +812,29 @@ export const useDongleConnection = () => {
       const port = await serialAPI.requestPort();
       
       addLog('SYS', 'Port selected, opening...');
-      await port.open({ baudRate: MODBUS_CONSTANTS.BAUD_RATE });
+      try {
+        await port.open({ baudRate: MODBUS_CONSTANTS.BAUD_RATE });
+      } catch (openErr: any) {
+        const errorDetail = openErr.message || String(openErr);
+        addLog('SYS', `Failed to open port: ${errorDetail}`, true);
+        addLog('SYS', 'Troubleshooting tips:', true);
+        addLog('SYS', '1. Check device is connected via USB', true);
+        addLog('SYS', '2. Unplug device and wait 2 seconds, then replug', true);
+        addLog('SYS', '3. Close other applications using the port', true);
+        addLog('SYS', '4. Try a different USB cable or USB port', true);
+        setConnectionState(ConnectionState.ERROR);
+        return;
+      }
       
       portRef.current = port;
       setConnectionState(ConnectionState.CONNECTED);
       
       addLog('SYS', `Serial connected using ${mode} mode.`);
+      addLog('SYS', 'Setting device password...');
+      
+      // Set password once after serial connection
+      await setDevicePassword();
+      
       addLog('SYS', 'Use Connect button to start communication.');
 
     } catch (err: any) {
@@ -484,6 +857,22 @@ export const useDongleConnection = () => {
     }
   };
 
+  /**
+   * Set device password (called once after serial connection)
+   * Required before any NTN or LoRa operations
+   */
+  const setDevicePassword = async () => {
+    try {
+      addLog('SYS', 'Configuring device password...');
+      const passwordPayload = [0, 0, 0, 0];
+      const frame = buildWriteMultipleRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_PASSWORD, passwordPayload);
+      await writeBytes(frame);
+      addLog('SYS', 'Device password configured successfully');
+    } catch (err) {
+      addLog('SYS', `Failed to set device password: ${err}`, true);
+    }
+  };
+
   return {
     connectionState,
     connect,
@@ -494,6 +883,11 @@ export const useDongleConnection = () => {
     applyNTNConfig,
     isReadLoopActive,
     startReadLoop,
-    stopReadLoop
+    startReadLoopOnly,
+    stopReadLoop,
+    writeBytes,
+    sendPCIE2Command,
+    readPCIE2Response,
+    testLoRaCommands
   };
 };
