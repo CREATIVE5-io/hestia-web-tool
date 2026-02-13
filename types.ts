@@ -46,6 +46,31 @@ export interface NTNConfig {
   localPort?: string;
 }
 
+export interface PCIE2CommandResult {
+  success: boolean;
+  data: string | null;
+  dataLength: number;
+  error?: string;
+}
+
+export interface DongleConnectionHandle {
+  connectionState: ConnectionState;
+  connect: (mode: DriverMode) => Promise<void>;
+  disconnect: () => Promise<void>;
+  logs: LogEntry[];
+  clearLogs: () => void;
+  data: DongleData;
+  applyNTNConfig: (config: NTNConfig) => Promise<boolean>;
+  isReadLoopActive: boolean;
+  startReadLoop: () => Promise<void>;
+  startReadLoopOnly: () => Promise<void>;
+  stopReadLoop: () => void;
+  writeBytes?: (bytes: Uint8Array) => Promise<void>;
+  sendPCIE2Command?: (command: string) => Promise<PCIE2CommandResult>;
+  readPCIE2Response?: () => Promise<PCIE2CommandResult>;
+  testLoRaCommands?: () => Promise<void>;
+}
+
 export const MODBUS_CONSTANTS = {
   SLAVE_ID: 1,
   BAUD_RATE: 115200,
@@ -68,6 +93,13 @@ export const MODBUS_CONSTANTS = {
   ADDR_APN: 0xC3BB,
   ADDR_REMOTE_IP: 0xC3CA,
   ADDR_LOCAL_PORT: 0xC3D5,
+
+  // PCIE2 CMD Addresses
+  PCIE2_CMD_START: 0xC700,
+  PCIE2_MOD_LEN: 0xF860,
+  PCIE2_MOD_START: 0xF861,
+  PCIE2_DATA_LEN: 0xF460,
+  PCIE2_DATA_START: 0xF461,
 };
 
 // Web Serial API Type Definitions
@@ -99,4 +131,40 @@ export interface SerialPortRequestOptions {
 export interface SerialPortFilter {
   usbVendorId?: number;
   usbProductId?: number;
+}
+
+// LoRa Configuration Types
+export interface LoRaDevice {
+  idx: string;
+  id: string;
+  nsKey: string;
+  appKey: string;
+  transmit_interval: string;
+}
+
+export interface LoRaConfig {
+  frequency: string;
+  sf: string;
+  ch_plan: string;
+  serial_interface: string;
+  dongle_id?: string;
+}
+
+export interface LoRaSetupProgress {
+  stage?: string;
+  current?: number;
+  total?: number;
+  percentage?: number;
+  message: string;
+  setup_status?: string;
+  failed_devices?: string[];
+  completed?: boolean;
+  error?: boolean;
+  timestamp?: number;
+}
+
+export interface SerialPortInfo {
+  device: string;
+  description: string;
+  hwid: string;
 }
