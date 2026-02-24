@@ -52,12 +52,14 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
   const [selectedDevices, setSelectedDevices] = useState<Set<string>>(new Set());
   const [showSetupPopup, setShowSetupPopup] = useState(false);
   const [setupMessage, setSetupMessage] = useState('');
+  const [addDeviceError, setAddDeviceError] = useState<string | null>(null);
+  const [deleteConfirmPending, setDeleteConfirmPending] = useState(false);
 
-  // Load initial data
+  // Load initial data on mount only
   useEffect(() => {
     fetchLoRaData();
     fetchSerialPorts();
-  }, [fetchLoRaData, fetchSerialPorts]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Register disconnect function so App.tsx can await it before switching tabs
   useEffect(() => {
@@ -109,23 +111,25 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
   };
 
   const handleAddDevice = async () => {
+    setAddDeviceError(null);
+
     if (!newDevice.id || !newDevice.nsKey || !newDevice.appKey) {
-      alert('Please fill in all required fields');
+      setAddDeviceError('Please fill in Device ID, Network Section Key, and Application Section Key');
       return;
     }
 
     if (newDevice.id.length !== 8) {
-      alert('Device ID must be exactly 8 characters');
+      setAddDeviceError('Device ID must be exactly 8 characters');
       return;
     }
 
     if (newDevice.nsKey.length !== 32) {
-      alert('Network Section Key must be exactly 32 characters');
+      setAddDeviceError('Network Section Key must be exactly 32 characters');
       return;
     }
 
     if (newDevice.appKey.length !== 32) {
-      alert('Application Section Key must be exactly 32 characters');
+      setAddDeviceError('Application Section Key must be exactly 32 characters');
       return;
     }
 
@@ -138,24 +142,22 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
         appKey: '',
         transmit_interval: '60',
       });
-      alert('Device added successfully');
     }
   };
 
   const handleDeleteSelectedDevices = async () => {
-    if (selectedDevices.size === 0) {
-      alert('Please select at least one device');
+    if (selectedDevices.size === 0) return;
+
+    if (!deleteConfirmPending) {
+      setDeleteConfirmPending(true);
+      setTimeout(() => setDeleteConfirmPending(false), 3000);
       return;
     }
 
-    if (!confirm(`Delete ${selectedDevices.size} device(s)?`)) {
-      return;
-    }
-
+    setDeleteConfirmPending(false);
     const success = await deleteDevices(Array.from(selectedDevices));
     if (success) {
       setSelectedDevices(new Set());
-      alert('Devices deleted successfully');
     }
   };
 
@@ -209,10 +211,10 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
         </div>
         <button
           onClick={handleSerialConnect}
-          className={`px-4 py-2.5 rounded-lg font-semibold transition-all shadow-lg hover:shadow-xl active:scale-95 ${
+          className={`px-4 py-2.5 rounded-lg font-semibold transition-all shadow-lg hover:shadow-xl active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-800 ${
             isConnected
-              ? 'bg-red-500/10 text-red-400 border border-red-500/50 hover:bg-red-500/20'
-              : 'bg-blue-600 text-white hover:bg-blue-500 shadow-blue-500/20'
+              ? 'bg-red-500/10 text-red-400 border border-red-500/50 hover:bg-red-500/20 focus-visible:ring-red-500'
+              : 'bg-blue-600 text-white hover:bg-blue-500 shadow-blue-500/20 focus-visible:ring-blue-500'
           }`}
         >
           {isConnected ? 'Serial Disconnect' : 'Serial Connect'}
@@ -221,17 +223,17 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
 
       {/* LoRa Status Display */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-slate-800/50 p-4 rounded-2xl border border-slate-700 backdrop-blur-sm">
-          <div className="text-xs text-slate-500 mb-1">Frequency</div>
-          <div className="text-2xl font-bold text-white">{loraStatus.frequency}</div>
+        <div className="bg-purple-900/15 p-4 rounded-2xl border border-purple-700/40 backdrop-blur-sm">
+          <div className="text-xs text-purple-400/80 mb-1 font-medium uppercase tracking-wide">Frequency</div>
+          <div className={`text-2xl font-bold ${loraStatus.frequency !== '--' ? 'text-white' : 'text-slate-500'}`}>{loraStatus.frequency}</div>
         </div>
-        <div className="bg-slate-800/50 p-4 rounded-2xl border border-slate-700 backdrop-blur-sm">
-          <div className="text-xs text-slate-500 mb-1">Spreading Factor</div>
-          <div className="text-2xl font-bold text-white">{loraStatus.sf}</div>
+        <div className="bg-purple-900/15 p-4 rounded-2xl border border-purple-700/40 backdrop-blur-sm">
+          <div className="text-xs text-purple-400/80 mb-1 font-medium uppercase tracking-wide">Spreading Factor</div>
+          <div className={`text-2xl font-bold ${loraStatus.sf !== '--' ? 'text-white' : 'text-slate-500'}`}>{loraStatus.sf}</div>
         </div>
-        <div className="bg-slate-800/50 p-4 rounded-2xl border border-slate-700 backdrop-blur-sm">
-          <div className="text-xs text-slate-500 mb-1">Channel Plan</div>
-          <div className="text-2xl font-bold text-white">{loraStatus.channelPlan}</div>
+        <div className="bg-purple-900/15 p-4 rounded-2xl border border-purple-700/40 backdrop-blur-sm">
+          <div className="text-xs text-purple-400/80 mb-1 font-medium uppercase tracking-wide">Channel Plan</div>
+          <div className={`text-2xl font-bold ${loraStatus.channelPlan !== '--' ? 'text-white' : 'text-slate-500'}`}>{loraStatus.channelPlan}</div>
         </div>
       </div>
 
@@ -254,7 +256,7 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-2">
-              Frequency (9 digits):
+              Frequency (9 digits)
             </label>
             <input
               type="text"
@@ -269,7 +271,7 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
 
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-2">
-              Spreading Factor:
+              Spreading Factor
             </label>
             <select
               name="sf"
@@ -287,7 +289,7 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
 
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-2">
-              Channel Plan:
+              Channel Plan
             </label>
             <select
               name="ch_plan"
@@ -310,7 +312,7 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
           <button
             onClick={handleStartConfigSetup}
             disabled={isLoading || isSetupInProgress}
-            className="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50"
+            className="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-800"
           >
             LoRa Config Setup
           </button>
@@ -369,10 +371,14 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
           {selectedDevices.size > 0 && (
             <button
               onClick={handleDeleteSelectedDevices}
-              className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg font-medium transition-colors"
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-800 ${
+                deleteConfirmPending
+                  ? 'bg-red-500 hover:bg-red-400 text-white focus-visible:ring-red-400 scale-[1.02]'
+                  : 'bg-red-600 hover:bg-red-500 text-white focus-visible:ring-red-500'
+              }`}
             >
               <TrashIcon className="w-4 h-4" />
-              Delete Selected ({selectedDevices.size})
+              {deleteConfirmPending ? `Confirm Delete (${selectedDevices.size})` : `Delete Selected (${selectedDevices.size})`}
             </button>
           )}
         </div>
@@ -392,7 +398,7 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
             <button
               onClick={handleListLoRaDevices}
               disabled={isLoading}
-              className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50"
+              className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-800"
             >
               List LoRa Devices
             </button>
@@ -401,7 +407,7 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-2">
-                Device Index (0-15):
+                Device Index (0-15)
               </label>
               <select
                 name="idx"
@@ -419,7 +425,7 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
 
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-2">
-                Device ID (8 characters):
+                Device ID (8 characters)
               </label>
               <input
                 type="text"
@@ -434,7 +440,7 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
 
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-2">
-                Network Section Key (32 characters):
+                Network Section Key (32 characters)
               </label>
               <input
                 type="text"
@@ -449,7 +455,7 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
 
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-2">
-                Application Section Key (32 characters):
+                Application Section Key (32 characters)
               </label>
               <input
                 type="text"
@@ -466,11 +472,18 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
           <button
             onClick={handleAddDevice}
             disabled={isLoading}
-            className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50"
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-800"
           >
             <PlusIcon className="w-4 h-4" />
             Add Device
           </button>
+
+          {addDeviceError && (
+            <div className="flex items-start gap-2 p-3 bg-red-900/20 border border-red-800/50 rounded-lg">
+              <ExclamationTriangleIcon className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+              <p className="text-xs text-red-300">{addDeviceError}</p>
+            </div>
+          )}
         </div>
       )}
 
@@ -507,7 +520,7 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
 
             <button
               onClick={handleClosePopup}
-              className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors"
+              className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-800"
             >
               Okay
             </button>
@@ -518,7 +531,7 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
       {/* Loading Spinner when setup is in progress */}
       {isSetupInProgress && !showSetupPopup && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-slate-800 border border-slate-700 rounded-2xl p-6 space-y-4">
+          <div className="bg-slate-800 border border-slate-700 rounded-2xl p-6 max-w-sm w-full mx-4 space-y-4">
             <div className="flex justify-center">
               <div className="animate-spin">
                 <Cog8ToothIcon className="w-8 h-8 text-blue-400" />
