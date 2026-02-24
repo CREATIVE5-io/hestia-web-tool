@@ -6,13 +6,14 @@ import { StatusBadge } from './components/StatusBadge';
 import { LogViewer } from './components/LogViewer';
 import { ConfigPanel } from './components/ConfigPanel';
 import { LoRaConfig } from './components/LoRaConfig';
-import { 
-  SignalIcon, 
-  WifiIcon, 
-  CommandLineIcon, 
+import {
+  SignalIcon,
+  WifiIcon,
+  CommandLineIcon,
   CpuChipIcon,
   FingerPrintIcon,
-  QuestionMarkCircleIcon
+  QuestionMarkCircleIcon,
+  ChartBarIcon,
 } from '@heroicons/react/24/outline';
 
 type Tab = 'ntn' | 'lora';
@@ -63,7 +64,7 @@ const App: React.FC = () => {
         <div className="flex gap-2 bg-slate-800/50 p-2 rounded-2xl border border-slate-700 backdrop-blur-sm">
           <button
             onClick={() => handleTabSwitch('ntn')}
-            className={`flex-1 px-6 py-3 rounded-lg font-semibold transition-all ${
+            className={`flex-1 px-6 py-3 rounded-lg font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-800 ${
               activeTab === 'ntn'
                 ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20'
                 : 'bg-transparent text-slate-400 hover:text-slate-200'
@@ -73,7 +74,7 @@ const App: React.FC = () => {
           </button>
           <button
             onClick={() => handleTabSwitch('lora')}
-            className={`flex-1 px-6 py-3 rounded-lg font-semibold transition-all ${
+            className={`flex-1 px-6 py-3 rounded-lg font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-800 ${
               activeTab === 'lora'
                 ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/20'
                 : 'bg-transparent text-slate-400 hover:text-slate-200'
@@ -122,10 +123,10 @@ const App: React.FC = () => {
               
               <button
                 onClick={handleSerialConnect}
-                className={`px-4 py-2.5 rounded-lg font-semibold transition-all shadow-lg hover:shadow-xl active:scale-95 ${
+                className={`px-4 py-2.5 rounded-lg font-semibold transition-all shadow-lg hover:shadow-xl active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-800 ${
                   isConnected
-                    ? 'bg-red-500/10 text-red-400 border border-red-500/50 hover:bg-red-500/20'
-                    : 'bg-blue-600 text-white hover:bg-blue-500 shadow-blue-500/20'
+                    ? 'bg-red-500/10 text-red-400 border border-red-500/50 hover:bg-red-500/20 focus-visible:ring-red-500'
+                    : 'bg-blue-600 text-white hover:bg-blue-500 shadow-blue-500/20 focus-visible:ring-blue-500'
                 }`}
               >
                 {isConnected ? 'Serial Disconnect' : 'Serial Connect'}
@@ -134,12 +135,12 @@ const App: React.FC = () => {
               <button
                 onClick={handleReadLoopToggle}
                 disabled={!isConnected}
-                className={`px-4 py-2.5 rounded-lg font-semibold transition-all shadow-lg hover:shadow-xl active:scale-95 ${
+                className={`px-4 py-2.5 rounded-lg font-semibold transition-all shadow-lg hover:shadow-xl active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-800 ${
                   !isConnected
-                    ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
+                    ? 'bg-slate-700 text-slate-500 cursor-not-allowed focus-visible:ring-slate-600'
                     : isReadLoopActive
-                    ? 'bg-orange-500/10 text-orange-400 border border-orange-500/50 hover:bg-orange-500/20'
-                    : 'bg-green-600 text-white hover:bg-green-500 shadow-green-500/20'
+                    ? 'bg-orange-500/10 text-orange-400 border border-orange-500/50 hover:bg-orange-500/20 focus-visible:ring-orange-500'
+                    : 'bg-green-600 text-white hover:bg-green-500 shadow-green-500/20 focus-visible:ring-green-500'
                 }`}
               >
                 {isReadLoopActive ? 'Disconnect' : 'Connect'}
@@ -174,11 +175,11 @@ const App: React.FC = () => {
 
             {/* Column 2: Device Info & Status */}
             <div className="space-y-6">
-              <DashboardCard title="Device Information">
+              <DashboardCard title="Device Information" accent="blue">
                 <div className="space-y-3">
                   <div className="flex items-center gap-2">
-                    <div className="p-1.5 bg-slate-700 rounded">
-                      <CpuChipIcon className="w-4 h-4 text-slate-300" />
+                    <div className="p-1.5 bg-blue-600/20 rounded border border-blue-500/30">
+                      <CpuChipIcon className="w-4 h-4 text-blue-400" />
                     </div>
                     <div>
                       <div className="text-xs text-slate-500">Model Name</div>
@@ -186,8 +187,8 @@ const App: React.FC = () => {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className="p-1.5 bg-slate-700 rounded">
-                      <CommandLineIcon className="w-4 h-4 text-slate-300" />
+                    <div className="p-1.5 bg-cyan-600/20 rounded border border-cyan-500/30">
+                      <CommandLineIcon className="w-4 h-4 text-cyan-400" />
                     </div>
                     <div>
                       <div className="text-xs text-slate-500">Firmware Version</div>
@@ -195,8 +196,8 @@ const App: React.FC = () => {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className="p-1.5 bg-slate-700 rounded">
-                      <FingerPrintIcon className="w-4 h-4 text-slate-300" />
+                    <div className="p-1.5 bg-violet-600/20 rounded border border-violet-500/30">
+                      <FingerPrintIcon className="w-4 h-4 text-violet-400" />
                     </div>
                     <div>
                       <div className="text-xs text-slate-500">IMSI</div>
@@ -206,21 +207,23 @@ const App: React.FC = () => {
                 </div>
               </DashboardCard>
 
-              <DashboardCard title="NTN Dongle Status">
+              <DashboardCard title="NTN Dongle Status" accent="blue">
                 <div className="flex flex-col space-y-1">
                   <StatusBadge label="Module AT Ready" active={data.status.moduleAtReady} />
                   <StatusBadge label="SIM Ready" active={data.status.simReady} />
                   <StatusBadge label="Network Registered" active={data.status.networkRegistered} />
                   <StatusBadge label="IP Ready" active={data.status.downlinkReady} />
                   <StatusBadge label="Socket Ready" active={data.status.socketReady} />
-                  <StatusBadge label="NTN Ready" active={data.status.moduleAtReady && data.status.simReady && data.status.networkRegistered && data.status.downlinkReady && data.status.socketReady} />
+                  <div className="pt-2 mt-1 border-t border-slate-700/70">
+                    <StatusBadge label="NTN Ready" active={data.status.moduleAtReady && data.status.simReady && data.status.networkRegistered && data.status.downlinkReady && data.status.socketReady} />
+                  </div>
                 </div>
               </DashboardCard>
             </div>
 
             {/* Column 3-4: Signal Metrics */}
             <div className="xl:col-span-2 lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6 h-fit">
-              <DashboardCard title="Signal Strength (RSRP)" className="h-full">
+              <DashboardCard title="Signal Strength (RSRP)" className="h-full" accent={data.rsrp !== '--' && parseInt(data.rsrp) > -100 ? 'green' : 'blue'}>
                  <div className="flex flex-col items-center justify-center py-4">
                    <SignalIcon className={`w-10 h-10 mb-2 ${
                      data.rsrp !== '--' && parseInt(data.rsrp) > -100 ? 'text-green-500' : 'text-slate-600'
@@ -232,13 +235,11 @@ const App: React.FC = () => {
                  </div>
               </DashboardCard>
 
-              <DashboardCard title="Signal Quality (SINR)" className="h-full">
+              <DashboardCard title="Signal Quality (SINR)" className="h-full" accent={data.sinr !== '--' && parseInt(data.sinr) > 5 ? 'green' : 'blue'}>
                  <div className="flex flex-col items-center justify-center py-4">
-                   <div className="w-10 h-10 rounded-full border-4 border-slate-700 flex items-center justify-center mb-2">
-                      <div className={`w-2 h-2 rounded-full ${
-                        data.sinr !== '--' && parseInt(data.sinr) > 5 ? 'bg-green-500' : 'bg-slate-600'
-                      }`} />
-                   </div>
+                   <ChartBarIcon className={`w-10 h-10 mb-2 ${
+                     data.sinr !== '--' && parseInt(data.sinr) > 5 ? 'text-green-500' : 'text-slate-600'
+                   }`} />
                    <div className="text-3xl font-bold text-white tracking-tighter">
                      {data.sinr} <span className="text-sm text-slate-500 font-normal">dB</span>
                    </div>

@@ -24,6 +24,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   const [showReconnectPrompt, setShowReconnectPrompt] = useState(false);
   const [useDefault, setUseDefault] = useState(false);
   const [savedConfig, setSavedConfig] = useState<NTNConfig | null>(null);
+  const [applyError, setApplyError] = useState<string | null>(null);
 
   // Load saved config on mount
   useEffect(() => {
@@ -60,8 +61,9 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   };
 
   const handleApply = async () => {
+    setApplyError(null);
     if (!useDefault && (!config.apn || !config.remoteIp || !config.remotePort)) {
-      alert('Please fill in APN, Remote IP, and Remote Port');
+      setApplyError('Please fill in APN, Remote IP, and Remote Port');
       return;
     }
 
@@ -186,14 +188,18 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
       <button
         onClick={handleApply}
         disabled={!isConnected || !isFormValid || isApplying}
-        className={`w-full px-3 py-2 rounded font-semibold text-sm transition-all ${
+        className={`w-full px-3 py-2 rounded font-semibold text-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-800 ${
           !isConnected || !isFormValid || isApplying
-            ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
-            : 'bg-orange-600 text-white hover:bg-orange-500 active:scale-95'
+            ? 'bg-slate-700 text-slate-500 cursor-not-allowed focus-visible:ring-slate-600'
+            : 'bg-orange-600 text-white hover:bg-orange-500 active:scale-95 focus-visible:ring-orange-500'
         }`}
       >
         {isApplying ? 'Applying...' : 'Apply Configuration'}
       </button>
+
+      {applyError && (
+        <p className="text-xs text-red-400 mt-2 text-center">{applyError}</p>
+      )}
 
       {!isConnected && (
         <p className="text-xs text-slate-500 mt-2 text-center">

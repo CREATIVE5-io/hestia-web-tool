@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { LoRaConfig, LoRaDevice, LoRaSetupProgress, MODBUS_CONSTANTS, ConnectionState, SerialPort, PCIE2CommandResult } from '../types';
-import { buildWriteMultipleRegisters, buildReadInputRegisters, hexString, atCommandToModbusRegisters, parseReadInputRegistersResponse } from '../utils/modbus';
+import { buildWriteMultipleRegisters, buildReadInputRegisters, atCommandToModbusRegisters, parseReadInputRegistersResponse } from '../utils/modbus';
 // @ts-ignore
 import { serial as polyfillSerial } from 'web-serial-polyfill';
 
@@ -34,7 +34,6 @@ export const useLoRaConnection = () => {
       const writer = portRef.current.writable.getWriter();
       await writer.write(bytes);
       writer.releaseLock();
-      console.log('TX:', hexString(bytes));
     } catch (err) {
       console.error('Write error:', err);
     }
@@ -112,8 +111,6 @@ export const useLoRaConnection = () => {
                   resolver(completeFrame);
                 }
               }
-              
-              console.log('RX:', hexString(completeFrame));
             }
           }
         }
@@ -163,7 +160,6 @@ export const useLoRaConnection = () => {
       // Always close port first if it has any streams
       try {
         if ((port as any).readable || (port as any).writable) {
-          console.log('Port already open, closing first...');
           await port.close();
           await sleep(500);
         }
@@ -175,14 +171,12 @@ export const useLoRaConnection = () => {
       
       portRef.current = port;
       setConnectionState(ConnectionState.CONNECTED);
-      
+
       // Set password
       const passwordPayload = [0, 0, 0, 0];
       const frame = buildWriteMultipleRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_PASSWORD, passwordPayload);
       await writeBytes(frame);
       await sleep(300);
-      
-      console.log('Serial connected');
       
       // Auto-run test commands after connection
       autoTestTimeoutRef.current = setTimeout(() => {
@@ -341,24 +335,19 @@ export const useLoRaConnection = () => {
       if (!keepReadingRef.current) {
         await startReadLoop();
       }
-      
-      console.log('Testing LoRa commands...');
-      
+
       if (!keepReadingRef.current) return;
       const freqResult = await sendPCIE2Command('AT+BISRXF=?');
-      console.log('Frequency:', freqResult.data);
       const frequency = freqResult.data || '--';
       await sleep(500);
 
       if (!keepReadingRef.current) return;
       const sfResult = await sendPCIE2Command('AT+BISRXSF=?');
-      console.log('SF:', sfResult.data);
       const sf = sfResult.data || '--';
       await sleep(500);
 
       if (!keepReadingRef.current) return;
       const chResult = await sendPCIE2Command('AT+BISCHPLAN=?');
-      console.log('Channel Plan:', chResult.data);
       const channelPlan = chResult.data || '--';
       
       // Update loraStatus with results
@@ -596,15 +585,13 @@ export const useLoRaConnection = () => {
     try {
       for (let i = 0; i < 16; i++) {
         const result = await sendPCIE2Command(`AT+BISDEV=${i}`);
-        console.log(`Device ${i} response:`, result.data);
         await sleep(300);
-        
+
         if (result.success && result.data) {
           // Parse format: [index] deviceID:nsKey:appKey
           const match = result.data.match(/\[(\d+)\]\s*([^:]+):([^:]+):(.+)/);
           if (match) {
-            const [, idx, id, nsKey, appKey] = match;
-            console.log(`Parsed device ${i}:`, { idx, id, nsKey, appKey });
+            const [,, id, nsKey, appKey] = match;
             if (id !== 'ffffffff' && id.toLowerCase() !== '0xffffffff' && nsKey !== 'ffffffffffffffffffffffffffffffff') {
               foundDevices[i] = {
                 idx: String(i),
@@ -614,13 +601,9 @@ export const useLoRaConnection = () => {
                 transmit_interval: '60',
               };
             }
-          } else {
-            console.log(`No match for device ${i}`);
           }
         }
       }
-      
-      console.log('Found devices:', foundDevices);
       setDevices(foundDevices);
       setError(null);
     } catch (err) {

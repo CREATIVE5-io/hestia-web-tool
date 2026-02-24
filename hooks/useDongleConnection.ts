@@ -49,7 +49,8 @@ export const useDongleConnection = () => {
         message,
         isError
       };
-      return [newLog, ...prev].slice(0, 100);
+      // Append newest at the end so LogViewer's bottomRef auto-scroll reaches the latest entry
+      return [...prev.slice(-99), newLog];
     });
   }, []);
 
@@ -667,16 +668,6 @@ export const useDongleConnection = () => {
     }
   };
 
-  /**
-   * Read PCIE2 response data after command completion
-   * Should be called after sendPCIE2Command completes
-   * @deprecated Use sendPCIE2Command instead which handles response internally
-   */
-  const readPCIE2Response = async (): Promise<string | null> => {
-    // This function is deprecated - sendPCIE2Command now handles responses internally
-    return null;
-  };
-
   const startReadLoop = useCallback(async () => {
     if (connectionState !== ConnectionState.CONNECTED || !portRef.current) {
       addLog('SYS', 'Not connected to device', true);
@@ -887,7 +878,6 @@ export const useDongleConnection = () => {
     stopReadLoop,
     writeBytes,
     sendPCIE2Command,
-    readPCIE2Response,
     testLoRaCommands
   };
 };
