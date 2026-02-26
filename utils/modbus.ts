@@ -159,6 +159,16 @@ export function extractQuotedString(asciiCodes: number[]): string {
   }
 }
 
+export function buildWriteSingleRegister(slaveId: number, reg: number, value: number): Uint8Array {
+  const payload = [
+    slaveId, 0x06,
+    (reg >> 8) & 0xFF, reg & 0xFF,
+    (value >> 8) & 0xFF, value & 0xFF,
+  ];
+  const crc = calculateCRC16(Uint8Array.from(payload));
+  return Uint8Array.from([...payload, crc & 0xFF, (crc >> 8) & 0xFF]);
+}
+
 export function generateModbusFrame(command: string, slaveId: number = 1): Uint8Array {
   // Convert AT command to Modbus registers
   const registers = stringToModbusRegisters(command);

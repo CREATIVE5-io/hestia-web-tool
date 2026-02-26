@@ -6,6 +6,7 @@ import { StatusBadge } from './components/StatusBadge';
 import { LogViewer } from './components/LogViewer';
 import { ConfigPanel } from './components/ConfigPanel';
 import { LoRaConfig } from './components/LoRaConfig';
+import { FirmwareUpdate } from './components/FirmwareUpdate';
 import {
   SignalIcon,
   WifiIcon,
@@ -16,7 +17,7 @@ import {
   ChartBarIcon,
 } from '@heroicons/react/24/outline';
 
-type Tab = 'ntn' | 'lora';
+type Tab = 'ntn' | 'lora' | 'firmware';
 
 const App: React.FC = () => {
   const dongleConn = useDongleConnection();
@@ -24,18 +25,23 @@ const App: React.FC = () => {
   const [driverMode, setDriverMode] = useState<DriverMode>(DriverMode.AUTO);
   const [activeTab, setActiveTab] = useState<Tab>('ntn');
   const loraDisconnectRef = useRef<(() => Promise<void>) | null>(null);
+  const fwDisconnectRef   = useRef<(() => Promise<void>) | null>(null);
+  const [isFwUpdating, setIsFwUpdating] = useState(false);
 
   const isConnected = connectionState === ConnectionState.CONNECTED;
 
   // Stop the active tab's connection before switching tabs
   const handleTabSwitch = async (tab: Tab) => {
     if (tab === activeTab) return;
+    if (isFwUpdating) return;
     if (activeTab === 'ntn') {
-      // Stop NTN read loop and disconnect serial port before switching to LoRa
+      // Stop NTN read loop and disconnect serial port before switching
       await disconnect();
     } else if (activeTab === 'lora' && loraDisconnectRef.current) {
-      // Stop LoRa loop and disconnect serial port before switching to NTN
+      // Stop LoRa loop and disconnect serial port before switching
       await loraDisconnectRef.current();
+    } else if (activeTab === 'firmware' && fwDisconnectRef.current) {
+      await fwDisconnectRef.current();
     }
     setActiveTab(tab);
   };
@@ -64,23 +70,42 @@ const App: React.FC = () => {
         <div className="flex gap-2 bg-slate-800/50 p-2 rounded-2xl border border-slate-700 backdrop-blur-sm">
           <button
             onClick={() => handleTabSwitch('ntn')}
+            disabled={isFwUpdating && activeTab !== 'ntn'}
             className={`flex-1 px-6 py-3 rounded-lg font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-800 ${
               activeTab === 'ntn'
                 ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20'
-                : 'bg-transparent text-slate-400 hover:text-slate-200'
+                : isFwUpdating
+                  ? 'bg-transparent text-slate-600 cursor-not-allowed'
+                  : 'bg-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
             NTN Dongle
           </button>
           <button
             onClick={() => handleTabSwitch('lora')}
+            disabled={isFwUpdating && activeTab !== 'lora'}
             className={`flex-1 px-6 py-3 rounded-lg font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-800 ${
               activeTab === 'lora'
                 ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/20'
-                : 'bg-transparent text-slate-400 hover:text-slate-200'
+                : isFwUpdating
+                  ? 'bg-transparent text-slate-600 cursor-not-allowed'
+                  : 'bg-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
             LoRa Configuration
+          </button>
+          <button
+            onClick={() => handleTabSwitch('firmware')}
+            disabled={isFwUpdating && activeTab !== 'firmware'}
+            className={`flex-1 px-6 py-3 rounded-lg font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-800 ${
+              activeTab === 'firmware'
+                ? 'bg-amber-600 text-white shadow-lg shadow-amber-500/20'
+                : isFwUpdating
+                  ? 'bg-transparent text-slate-600 cursor-not-allowed'
+                  : 'bg-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            Firmware Update
           </button>
         </div>
 
@@ -260,6 +285,15 @@ const App: React.FC = () => {
           <LoRaConfig onRegisterDisconnect={(fn) => { loraDisconnectRef.current = fn; }} />
         )}
 
+        {/* Firmware Update Tab Content */}
+        {activeTab === 'firmware' && (
+          <FirmwareUpdate
+            driverMode={driverMode}
+            onRegisterDisconnect={(fn) => { fwDisconnectRef.current = fn; }}
+            onRunningChange={setIsFwUpdating}
+          />
+        )}
+
         {/* Footer */}
         <div className="text-center text-slate-600 text-sm py-4">
            {isConnected && isReadLoopActive && activeTab === 'ntn' ? (
@@ -274,8 +308,10 @@ const App: React.FC = () => {
              <span>Serial connected - Click Connect to start communication</span>
            ) : activeTab === 'ntn' ? (
              <span>Waiting for serial connection...</span>
-           ) : (
+           ) : activeTab === 'lora' ? (
              <span>LoRa Configuration Interface - Configure your LoRa dongle and devices</span>
+           ) : (
+             <span>Firmware Update — Flash NTN Dongle firmware via Web Serial</span>
            )}
         </div>
 
