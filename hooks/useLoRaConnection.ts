@@ -463,12 +463,36 @@ export const useLoRaConnection = () => {
   // Delete devices
   const deleteDevices = useCallback(
     async (deviceIndices: (string | number)[]): Promise<boolean> => {
-      const newDevices = { ...devices };
-      deviceIndices.forEach(idx => {
-        delete newDevices[idx];
-      });
-      setDevices(newDevices);
-      return true;
+      if (!keepReadingRef.current) {
+        setError('Not connected to device');
+        return false;
+      }
+
+      try {
+        for (const idx of deviceIndices) {
+          const cmd = `AT+BISDEV=${idx}:ffffffff:ffffffffffffffffffffffffffffffff:ffffffffffffffffffffffffffffffff`;
+          const result = await sendPCIE2Command(cmd);
+          if (!result.success) throw new Error(`Failed to delete device ${idx} from hardware`);
+          await sleep(500);
+        }
+
+        // Save parameters
+        const saveResult = await sendPCIE2Command('AT+BISS');
+        if (!saveResult.success) throw new Error('Failed to save parameters after deletion');
+        await sleep(500);
+
+        const newDevices = { ...devices };
+        deviceIndices.forEach(idx => {
+          delete newDevices[idx];
+        });
+        setDevices(newDevices);
+        setError(null);
+        return true;
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : 'Failed to delete device';
+        setError(errorMsg);
+        return false;
+      }
     },
     [devices]
   );
