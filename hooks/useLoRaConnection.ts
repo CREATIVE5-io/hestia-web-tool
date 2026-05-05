@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import { LoRaConfig, LoRaDevice, LoRaSetupProgress, MODBUS_CONSTANTS, ConnectionState, SerialPort, PCIE2CommandResult } from '../types';
+import { LoRaConfig, LoRaDevice, LoRaSetupProgress, MODBUS_CONSTANTS, ConnectionState, SerialPort, PCIE2CommandResult, LogEntry } from '../types';
 import { buildWriteMultipleRegisters, buildReadInputRegisters, atCommandToModbusRegisters, parseReadInputRegistersResponse } from '../utils/modbus';
 // @ts-ignore
 import { serial as polyfillSerial } from 'web-serial-polyfill';
@@ -24,8 +24,24 @@ export const useLoRaConnection = () => {
   const [isSetupInProgress, setIsSetupInProgress] = useState(false);
   const [serialPorts, setSerialPorts] = useState<Array<{ port: string; description: string }>>([]);
   const [loraStatus, setLoraStatus] = useState<{ frequency: string; sf: string; channelPlan: string }>({ frequency: '--', sf: '--', channelPlan: '--' });
+  const [logs, setLogs] = useState<LogEntry[]>([]);
 
   const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+  const addLog = useCallback((direction: 'TX' | 'RX' | 'SYS', message: string, isError = false) => {
+    const now = new Date();
+    const timestamp = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}.${String(now.getMilliseconds()).padStart(3, '0')}`;
+    const newLog: LogEntry = {
+      id: `${Date.now()}-${Math.random()}`,
+      timestamp,
+      direction,
+      message,
+      isError,
+    };
+    setLogs(prev => [...prev.slice(-499), newLog]);
+  }, []);
+
+  const clearLogs = useCallback(() => setLogs([]), []);
 
   // Serial write function
   const writeBytes = async (bytes: Uint8Array) => {
@@ -36,6 +52,7 @@ export const useLoRaConnection = () => {
       writer.releaseLock();
     } catch (err) {
       console.error('Write error:', err);
+      addLog('SYS', `Write error: ${err}`, true);
     }
   };
 
@@ -69,6 +86,7 @@ export const useLoRaConnection = () => {
           responseResolveQueueRef.current.splice(idx, 1);
         }
         console.error('Modbus response timeout');
+        addLog('SYS', 'Modbus response timeout', true);
         resolve(null);
       }, timeout);
     });
@@ -168,9 +186,10 @@ export const useLoRaConnection = () => {
       }
       
       await port.open({ baudRate: MODBUS_CONSTANTS.BAUD_RATE });
-      
+
       portRef.current = port;
       setConnectionState(ConnectionState.CONNECTED);
+      addLog('SYS', `Connected at ${MODBUS_CONSTANTS.BAUD_RATE} baud`);
 
       // Set password
       const passwordPayload = [0, 0, 0, 0];
@@ -184,6 +203,7 @@ export const useLoRaConnection = () => {
       }, 1000);
     } catch (err) {
       console.error('Connection failed:', err);
+      addLog('SYS', `Connection failed: ${err}`, true);
       setConnectionState(ConnectionState.ERROR);
     }
   };
@@ -212,6 +232,7 @@ export const useLoRaConnection = () => {
       portRef.current = null;
     }
     setConnectionState(ConnectionState.DISCONNECTED);
+    addLog('SYS', 'Disconnected');
   };
 
   // Send PCIE2 command
@@ -220,14 +241,16 @@ export const useLoRaConnection = () => {
       if (!keepReadingRef.current) {
         await startReadLoop();
       }
-      
+
+      addLog('TX', command);
+
       const atCmdRegisters = atCommandToModbusRegisters(command);
       const cmdFrame = buildWriteMultipleRegisters(
         MODBUS_CONSTANTS.SLAVE_ID,
         MODBUS_CONSTANTS.PCIE2_CMD_START,
         atCmdRegisters
       );
-      
+
       await sendModbusRequest(cmdFrame, 1000);
       await sleep(3000);
 
@@ -274,8 +297,8 @@ export const useLoRaConnection = () => {
               .map(byte => String.fromCharCode(byte))
               .join('');
             
-            // Only extract value after colon for query commands (not BISDEV)
-            if (!command.includes('BISDEV')) {
+            // Only extract value after colon for query commands (not BISDEV/BISOTAA — return full raw data)
+            if (!command.includes('BISDEV') && !command.includes('BISOTAA')) {
               const match = responseData.match(/:\s*(\S+)/);
               if (match) {
                 responseData = match[1];
@@ -285,12 +308,15 @@ export const useLoRaConnection = () => {
         }
       }
       
+      const result = responseData || 'OK';
+      addLog('RX', result);
       return {
         success: true,
-        data: responseData || 'OK',
+        data: result,
         dataLength: dataLength,
       };
     } catch (error) {
+      addLog('SYS', `Command error: ${error}`, true);
       return { success: false, data: null, dataLength: 0, error: String(error) };
     }
   };
@@ -309,6 +335,14 @@ export const useLoRaConnection = () => {
     const idx = parseInt(device.idx);
     if (isNaN(idx) || idx < 0 || idx > 15) {
       return { valid: false, error: 'Device index must be between 0 and 15' };
+    }
+    if (device.otaaMode) {
+      if (!device.devEUI || device.devEUI.length !== 16) {
+        return { valid: false, error: 'DevEUI must be exactly 16 hex characters' };
+      }
+      if (!device.appEUI || device.appEUI.length !== 16) {
+        return { valid: false, error: 'AppEUI must be exactly 16 hex characters' };
+      }
     }
     return { valid: true };
   };
@@ -440,6 +474,15 @@ export const useLoRaConnection = () => {
         if (!result.success) throw new Error('Failed to add device to hardware');
         await sleep(500);
 
+        // Send OTAA parameters if OTAA mode is enabled
+        // Format: AT+BISOTAA={idx}:{AppEUI 16chars}:{DevEUI 16chars}:{AppKey 32chars}
+        if (device.otaaMode && device.appEUI && device.devEUI) {
+          const otaaCmd = `AT+BISOTAA=${device.idx}:${device.appEUI}:${device.devEUI}:${device.appKey}`;
+          const otaaResult = await sendPCIE2Command(otaaCmd);
+          if (!otaaResult.success) throw new Error('Failed to set OTAA parameters');
+          await sleep(500);
+        }
+
         // Save parameters
         const saveResult = await sendPCIE2Command('AT+BISS');
         if (!saveResult.success) throw new Error('Failed to save parameters');
@@ -474,6 +517,13 @@ export const useLoRaConnection = () => {
           const result = await sendPCIE2Command(cmd);
           if (!result.success) throw new Error(`Failed to delete device ${idx} from hardware`);
           await sleep(500);
+
+          // Also clean OTAA slot if this device had OTAA enabled
+          if (devices[idx]?.otaaMode) {
+            const otaaCmd = `AT+BISOTAA=${idx}:ffffffffffffffff:ffffffffffffffff:ffffffffffffffffffffffffffffffff`;
+            await sendPCIE2Command(otaaCmd);
+            await sleep(500);
+          }
         }
 
         // Save parameters
@@ -607,8 +657,10 @@ export const useLoRaConnection = () => {
     const foundDevices: Record<string, LoRaDevice> = {};
 
     try {
+      // Pass 1: scan all 16 BISDEV slots — OTAA queries are deferred so they don't
+      // block the hardware and cause subsequent BISDEV writes to time out.
       for (let i = 0; i < 16; i++) {
-        const result = await sendPCIE2Command(`AT+BISDEV=${i}`);
+        const result = await sendPCIE2Command(`AT+BISDEV=${i}?`);
         await sleep(300);
 
         if (result.success && result.data) {
@@ -628,6 +680,27 @@ export const useLoRaConnection = () => {
           }
         }
       }
+
+      // Pass 2: query OTAA params for every found device (0–15)
+      for (const idxStr of Object.keys(foundDevices)) {
+        const i = parseInt(idxStr);
+        const otaaResult = await sendPCIE2Command(`AT+BISOTAA=${i}?`);
+        await sleep(300);
+        if (otaaResult.success && otaaResult.data) {
+          // Response format: [idx] DevEUI:value,AppEUI:value,AppKey:value OK
+          const otaaMatch = otaaResult.data.match(/DevEUI:([0-9a-fA-F]{16}),AppEUI:([0-9a-fA-F]{16})/i);
+          if (otaaMatch) {
+            const [, devEUI, appEUI] = otaaMatch;
+            const nullEUI = 'ffffffffffffffff';
+            if (appEUI.toLowerCase() !== nullEUI && devEUI.toLowerCase() !== nullEUI) {
+              foundDevices[i].appEUI = appEUI;
+              foundDevices[i].devEUI = devEUI;
+              foundDevices[i].otaaMode = true;
+            }
+          }
+        }
+      }
+
       setDevices(foundDevices);
       setError(null);
     } catch (err) {
@@ -707,6 +780,8 @@ export const useLoRaConnection = () => {
     isSetupInProgress,
     serialPorts,
     loraStatus,
+    logs,
+    clearLogs,
     validateDevice,
     validateConfig,
     testLoRaCommands,
