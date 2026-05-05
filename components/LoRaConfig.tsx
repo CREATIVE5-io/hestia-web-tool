@@ -7,6 +7,7 @@ import {
   CheckCircleIcon,
 } from '@heroicons/react/24/outline';
 import { useLoRaConnection } from '../hooks/useLoRaConnection';
+import { LogViewer } from './LogViewer';
 import { LoRaDevice } from '../types';
 
 interface LoRaConfigProps {
@@ -25,6 +26,8 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
     setupProgress,
     isSetupInProgress,
     loraStatus,
+    logs,
+    clearLogs,
     fetchLoRaData,
     fetchSerialPorts,
     addDevice,
@@ -47,6 +50,9 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
     nsKey: '',
     appKey: '',
     transmit_interval: '60',
+    otaaMode: false,
+    devEUI: '',
+    appEUI: '',
   });
 
   const [selectedDevices, setSelectedDevices] = useState<Set<string>>(new Set());
@@ -103,10 +109,11 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
   };
 
   const handleNewDeviceChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    const { name, value } = e.target;
+    const target = e.target as HTMLInputElement;
+    const { name, value, type } = target;
     setNewDevice(prev => ({
       ...prev,
-      [name]: value,
+      [name]: type === 'checkbox' ? target.checked : value,
     }));
   };
 
@@ -133,6 +140,17 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
       return;
     }
 
+    if (newDevice.otaaMode) {
+      if (!newDevice.devEUI || newDevice.devEUI.length !== 16) {
+        setAddDeviceError('DevEUI must be exactly 16 characters');
+        return;
+      }
+      if (!newDevice.appEUI || newDevice.appEUI.length !== 16) {
+        setAddDeviceError('AppEUI must be exactly 16 characters');
+        return;
+      }
+    }
+
     const success = await addDevice(newDevice as LoRaDevice);
     if (success) {
       setNewDevice({
@@ -141,6 +159,9 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
         nsKey: '',
         appKey: '',
         transmit_interval: '60',
+        otaaMode: false,
+        devEUI: '',
+        appEUI: '',
       });
     }
   };
@@ -341,6 +362,8 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
                   <th className="text-left py-3 px-3 font-semibold text-slate-400">Device ID</th>
                   <th className="text-left py-3 px-3 font-semibold text-slate-400">Net Section Key</th>
                   <th className="text-left py-3 px-3 font-semibold text-slate-400">App Section Key</th>
+                  <th className="text-left py-3 px-3 font-semibold text-slate-400">DevEUI</th>
+                  <th className="text-left py-3 px-3 font-semibold text-slate-400">AppEUI</th>
                 </tr>
               </thead>
               <tbody>
@@ -361,6 +384,12 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
                     </td>
                     <td className="py-3 px-3 font-mono text-xs truncate" title={device.appKey}>
                       {device.appKey}
+                    </td>
+                    <td className="py-3 px-3 font-mono text-xs text-slate-400">
+                      {device.devEUI || <span className="text-slate-600">—</span>}
+                    </td>
+                    <td className="py-3 px-3 font-mono text-xs text-slate-400">
+                      {device.appEUI || <span className="text-slate-600">—</span>}
                     </td>
                   </tr>
                 ))}
@@ -469,6 +498,72 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
             </div>
           </div>
 
+          {/* OTAA Node Toggle */}
+          <div className="flex items-center gap-3 pt-1">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={newDevice.otaaMode}
+              onClick={() => setNewDevice(prev => ({ ...prev, otaaMode: !prev.otaaMode }))}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 focus:ring-offset-slate-800 ${
+                newDevice.otaaMode ? 'bg-green-600' : 'bg-slate-600'
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ${
+                  newDevice.otaaMode ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+            <span className="text-sm font-medium text-slate-300">OTAA Node</span>
+            {newDevice.otaaMode && (
+              <span className="text-xs text-green-400/80">sends AT+BISOTAA</span>
+            )}
+          </div>
+
+          {/* OTAA Fields */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className={`block text-sm font-medium mb-2 ${newDevice.otaaMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                DevEUI (16 characters)
+              </label>
+              <input
+                type="text"
+                name="devEUI"
+                value={newDevice.devEUI}
+                onChange={handleNewDeviceChange}
+                maxLength={16}
+                placeholder="0000000000000000"
+                disabled={!newDevice.otaaMode}
+                className={`w-full border rounded-lg px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-green-500 transition-colors ${
+                  newDevice.otaaMode
+                    ? 'bg-slate-900 border-slate-600 text-slate-200'
+                    : 'bg-slate-900/40 border-slate-700 text-slate-600 cursor-not-allowed'
+                }`}
+              />
+            </div>
+
+            <div>
+              <label className={`block text-sm font-medium mb-2 ${newDevice.otaaMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                AppEUI (16 characters)
+              </label>
+              <input
+                type="text"
+                name="appEUI"
+                value={newDevice.appEUI}
+                onChange={handleNewDeviceChange}
+                maxLength={16}
+                placeholder="0000000000000000"
+                disabled={!newDevice.otaaMode}
+                className={`w-full border rounded-lg px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-green-500 transition-colors ${
+                  newDevice.otaaMode
+                    ? 'bg-slate-900 border-slate-600 text-slate-200'
+                    : 'bg-slate-900/40 border-slate-700 text-slate-600 cursor-not-allowed'
+                }`}
+              />
+            </div>
+          </div>
+
           <button
             onClick={handleAddDevice}
             disabled={isLoading}
@@ -492,6 +587,11 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
           Maximum of 16 devices reached.
         </div>
       )}
+
+      {/* Serial Log */}
+      <div className="h-64">
+        <LogViewer logs={logs} onClear={clearLogs} />
+      </div>
 
       {/* Setup Progress Popup */}
       {showSetupPopup && setupProgress && (

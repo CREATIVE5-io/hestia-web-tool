@@ -140,6 +140,9 @@ export interface LoRaDevice {
   nsKey: string;
   appKey: string;
   transmit_interval: string;
+  otaaMode?: boolean;
+  devEUI?: string;
+  appEUI?: string;
 }
 
 export interface LoRaConfig {
