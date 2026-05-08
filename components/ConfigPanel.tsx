@@ -10,8 +10,8 @@ interface ConfigPanelProps {
 
 const CONFIG_STORAGE_KEY = 'ntn-dongle-config';
 
-export const ConfigPanel: React.FC<ConfigPanelProps> = ({ 
-  onApplyConfig, 
+export const ConfigPanel: React.FC<ConfigPanelProps> = ({
+  onApplyConfig,
   isConnected
 }) => {
   const [config, setConfig] = useState<NTNConfig>({
@@ -26,7 +26,6 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   const [savedConfig, setSavedConfig] = useState<NTNConfig | null>(null);
   const [applyError, setApplyError] = useState<string | null>(null);
 
-  // Load saved config on mount
   useEffect(() => {
     const saved = localStorage.getItem(CONFIG_STORAGE_KEY);
     if (saved) {

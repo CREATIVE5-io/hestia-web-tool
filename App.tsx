@@ -7,6 +7,8 @@ import { LogViewer } from './components/LogViewer';
 import { ConfigPanel } from './components/ConfigPanel';
 import { LoRaConfig } from './components/LoRaConfig';
 import { FirmwareUpdate } from './components/FirmwareUpdate';
+import { DongleModelPanel, loadSavedModel } from './components/DongleModelPanel';
+import type { DongleModel } from './components/DongleModelPanel';
 import {
   SignalIcon,
   WifiIcon,
@@ -20,6 +22,7 @@ import {
 type Tab = 'ntn' | 'lora' | 'firmware';
 
 const App: React.FC = () => {
+  const [dongleModel, setDongleModel] = useState<DongleModel>(loadSavedModel);
   const dongleConn = useDongleConnection();
   const { connectionState, connect, disconnect, logs, clearLogs, data, applyNTNConfig, isReadLoopActive, startReadLoop, stopReadLoop } = dongleConn;
   const [driverMode, setDriverMode] = useState<DriverMode>(DriverMode.AUTO);
@@ -190,8 +193,9 @@ const App: React.FC = () => {
         {activeTab === 'ntn' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-6">
             
-            {/* Column 1: Configuration Panel */}
+            {/* Column 1: Model Selection + Configuration Panel */}
             <div className="space-y-6">
+              <DongleModelPanel model={dongleModel} onChange={setDongleModel} />
               <ConfigPanel
                 onApplyConfig={applyNTNConfig}
                 isConnected={isConnected}
