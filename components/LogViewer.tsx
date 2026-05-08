@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { LogEntry } from '../types';
 
 interface LogViewerProps {
@@ -8,19 +8,30 @@ interface LogViewerProps {
 
 export const LogViewer: React.FC<LogViewerProps> = ({ logs, onClear }) => {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [autoScroll, setAutoScroll] = useState(true);
+
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
+    setAutoScroll(atBottom);
+  };
 
   useEffect(() => {
-    if (bottomRef.current) {
+    if (autoScroll && bottomRef.current) {
       bottomRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [logs]);
+  }, [logs, autoScroll]);
 
   return (
     <div className="flex flex-col h-full bg-slate-950 rounded-lg border border-slate-800 font-mono text-xs overflow-hidden">
       <div className="bg-slate-900 px-4 py-2 border-b border-slate-800 font-semibold flex justify-between items-center">
         <span className="text-blue-400">SERIAL LOG</span>
         <div className="flex items-center gap-4">
-          <span className="text-blue-400/50 text-[10px] uppercase tracking-wider">Autoscroll ON</span>
+          <span className={`text-[10px] uppercase tracking-wider ${autoScroll ? 'text-blue-400/50' : 'text-slate-600'}`}>
+            Autoscroll {autoScroll ? 'ON' : 'OFF'}
+          </span>
           {onClear && (
             <button
               onClick={onClear}
@@ -31,7 +42,11 @@ export const LogViewer: React.FC<LogViewerProps> = ({ logs, onClear }) => {
           )}
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto p-4 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-900">
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto p-4 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-900"
+      >
         {logs.length === 0 ? (
           <div className="h-full flex items-center justify-center">
             <span className="text-slate-600 italic">No activity...</span>
