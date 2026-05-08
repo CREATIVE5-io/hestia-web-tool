@@ -535,6 +535,7 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1') => {
       // Step 3: Poll for response length (retry if needed)
       let dataLength = 0;
       let retries = 0;
+      lastCommandRef.current = 'PCIE2_LENGTH';
 
       while (retries < maxRetries && dataLength === 0) {
         const lenResponse = await sendModbusRequest(buildReadInputRegisters(
@@ -569,7 +570,8 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1') => {
         addLog('SYS', `PCIE2 CMD: Reading ${dataLength} bytes of response data...`);
         
         const numRegisters = dataLength;
-        
+
+        lastCommandRef.current = 'PCIE2_DATA';
         const dataResponse = await sendModbusRequest(buildReadInputRegisters(
           MODBUS_CONSTANTS.SLAVE_ID,
           respDataReg,
@@ -586,14 +588,25 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1') => {
               dataBytes.push((reg >> 8) & 0xFF);
               dataBytes.push(reg & 0xFF);
             }
-            responseData = dataBytes.slice(0, dataLength*2)
+            const rawStr = dataBytes.slice(0, dataLength * 2)
               .map(byte => String.fromCharCode(byte))
               .join('');
-            
-            // Parse value from response (e.g., "RX Frequency: 923200000\r\n\r\nOK")
-            const match = responseData.match(/:\s*(\S+)/);
-            if (match) {
-              responseData = match[1];
+
+            if (command.startsWith('AT+BISGET=')) {
+              // Response format: AT!CULMSG=..,<count>,"<hex_payload>",..
+              // Empty "" means no LoRa data waiting; responseData stays '' so we return null below
+              const hexMatch = rawStr.match(/"([0-9a-fA-F]*)"/i);
+              if (hexMatch && hexMatch[1].length > 0) {
+                const hexStr = hexMatch[1];
+                const decoded: number[] = [];
+                for (let i = 0; i + 1 < hexStr.length; i += 2) {
+                  decoded.push(parseInt(hexStr.substring(i, i + 2), 16));
+                }
+                responseData = new TextDecoder().decode(new Uint8Array(decoded));
+              }
+            } else {
+              const match = rawStr.match(/:\s*(\S+)/);
+              responseData = match ? match[1] : rawStr.trim();
             }
             
             addLog('SYS', `PCIE2 CMD: Response received: ${responseData}`);
@@ -602,10 +615,14 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1') => {
       }
 
       addLog('SYS', `PCIE2 CMD: Completed successfully`);
-      
+
+      // AT+BISGET=? returns null when payload is empty ("") — caller must not update state
+      const resultData = command.startsWith('AT+BISGET=')
+        ? (responseData || null)
+        : (responseData || 'OK');
       return {
         success: true,
-        data: responseData || 'OK',
+        data: resultData,
         dataLength: dataLength,
       };
 
@@ -683,7 +700,8 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1') => {
   const pollLoraData = async () => {
     if (!keepReadingRef.current) return;
     const result = await sendPCIE2Command('AT+BISGET=?', 3);
-    if (result.success && result.data) {
+    // Only update when there is actual decoded payload; null means "" (empty) — keep last known value
+    if (result.success && result.data !== null) {
       setData(prev => ({ ...prev, loraData: result.data as string, lastUpdated: Date.now() }));
     }
   };
