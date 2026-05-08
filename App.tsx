@@ -194,17 +194,12 @@ const App: React.FC = () => {
         {activeTab === 'ntn' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-6">
             
-            {/* Column 1: Model Selection + Configuration Panel */}
-            <div className="space-y-6">
-              <DongleModelPanel model={dongleModel} onChange={setDongleModel} />
-              <ConfigPanel
-                onApplyConfig={applyNTNConfig}
-                isConnected={isConnected}
-              />
-            </div>
+            {/* Columns 1+2: inner 2-col grid so row-mates share the same height automatically */}
+            <div className="lg:col-span-2 xl:col-span-2 grid grid-cols-1 lg:grid-cols-2 gap-6 content-start">
 
-            {/* Column 2: Device Info, Status & (A2) LoRa Data */}
-            <div className="space-y-6">
+              {/* Row 1: Dongle Model | Device Information */}
+              <DongleModelPanel model={dongleModel} onChange={setDongleModel} />
+
               <DashboardCard title="Device Information" accent="blue">
                 <div className="space-y-3">
                   <div className="flex items-center gap-2">
@@ -237,6 +232,12 @@ const App: React.FC = () => {
                 </div>
               </DashboardCard>
 
+              {/* Row 2: Config | NTN Status */}
+              <ConfigPanel
+                onApplyConfig={applyNTNConfig}
+                isConnected={isConnected}
+              />
+
               <DashboardCard title="NTN Dongle Status" accent="blue">
                 <div className="flex flex-col space-y-1">
                   <StatusBadge label="Module AT Ready" active={data.status.moduleAtReady} />
@@ -250,20 +251,23 @@ const App: React.FC = () => {
                 </div>
               </DashboardCard>
 
+              {/* Row 3 (A2 only): LoRa Data spanning both inner columns */}
               {dongleModel === 'A2' && (
-                <DashboardCard title="LoRa Data" accent="blue">
-                  <div className="flex items-start gap-2">
-                    <div className="p-1.5 bg-purple-600/20 rounded border border-purple-500/30 shrink-0 mt-0.5">
-                      <RssIcon className="w-4 h-4 text-purple-400" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-xs text-slate-500 mb-1">AT+BISGET=? payload</div>
-                      <div className={`font-mono text-sm break-all ${data.loraData === '--' ? 'text-slate-500' : 'text-green-400'}`}>
-                        {data.loraData}
+                <div className="lg:col-span-2">
+                  <DashboardCard title="LoRa Data" accent="blue">
+                    <div className="flex items-start gap-2">
+                      <div className="p-1.5 bg-purple-600/20 rounded border border-purple-500/30 shrink-0 mt-0.5">
+                        <RssIcon className="w-4 h-4 text-purple-400" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs text-slate-500 mb-1">AT+BISGET=? payload</div>
+                        <div className={`font-mono text-sm break-all ${data.loraData === '--' ? 'text-slate-500' : 'text-green-400'}`}>
+                          {data.loraData}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </DashboardCard>
+                  </DashboardCard>
+                </div>
               )}
             </div>
 
