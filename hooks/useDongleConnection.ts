@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { ConnectionState, LogEntry, DongleData, MODBUS_CONSTANTS, SerialPort, DriverMode, NTNConfig, PCIE2CommandResult } from '../types';
+import type { DongleModel } from '../components/DongleModelPanel';
 import { buildReadInputRegisters, buildWriteMultipleRegisters, hexString, parseModbusString, stringToModbusRegisters, atCommandToModbusRegisters, parseReadInputRegistersResponse } from '../utils/modbus';
 // @ts-ignore - The polyfill types aren't always perfect, ignore for build safety
 import { serial as polyfillSerial } from 'web-serial-polyfill';
 
-export const useDongleConnection = () => {
+export const useDongleConnection = (dongleModel: DongleModel = 'A1') => {
   const [connectionState, setConnectionState] = useState<ConnectionState>(ConnectionState.DISCONNECTED);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [isReadLoopActive, setIsReadLoopActive] = useState(false);
@@ -21,6 +22,7 @@ export const useDongleConnection = () => {
     },
     rsrp: '--',
     sinr: '--',
+    loraData: '--',
     lastUpdated: 0,
     configApplied: false
   });
@@ -34,7 +36,8 @@ export const useDongleConnection = () => {
   const unlockVerifiedRef = useRef<boolean>(false);
   const pcie2ResponseRef = useRef<{ length: number; data: Uint8Array | null }>({ length: 0, data: null });
   const isClosingRef = useRef<boolean>(false);
-  
+  const dongleModelRef = useRef<DongleModel>(dongleModel);
+
   // Response queue for request/response matching - supports multiple pending requests
   const responseResolveQueueRef = useRef<Array<(data: Uint8Array) => void>>([]);
   const responseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -112,6 +115,10 @@ export const useDongleConnection = () => {
       cleanupResources().catch(console.error);
     };
   }, []);
+
+  useEffect(() => {
+    dongleModelRef.current = dongleModel;
+  }, [dongleModel]);
 
   const writeBytes = async (bytes: Uint8Array) => {
     if (!portRef.current || !portRef.current.writable) return;
@@ -407,6 +414,11 @@ export const useDongleConnection = () => {
 
     lastCommandRef.current = 'RSRP';
     await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_RSRP, 2));
+
+    if (dongleModelRef.current === 'A2') {
+      await sleep(200);
+      await pollLoraData();
+    }
   };
 
   const startPolling = () => {
@@ -665,6 +677,14 @@ export const useDongleConnection = () => {
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Unknown error';
       addLog('SYS', `LoRa test error: ${errorMsg}`, true);
+    }
+  };
+
+  const pollLoraData = async () => {
+    if (!keepReadingRef.current) return;
+    const result = await sendPCIE2Command('AT+BISGET=?', 3);
+    if (result.success && result.data) {
+      setData(prev => ({ ...prev, loraData: result.data as string, lastUpdated: Date.now() }));
     }
   };
 

@@ -35,6 +35,7 @@ export interface DongleData {
   status: DongleStatus;
   rsrp: string;
   sinr: string;
+  loraData: string;
   lastUpdated: number;
   configApplied?: boolean;
 }

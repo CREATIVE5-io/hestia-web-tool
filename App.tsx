@@ -17,13 +17,14 @@ import {
   FingerPrintIcon,
   QuestionMarkCircleIcon,
   ChartBarIcon,
+  RssIcon,
 } from '@heroicons/react/24/outline';
 
 type Tab = 'ntn' | 'lora' | 'firmware';
 
 const App: React.FC = () => {
   const [dongleModel, setDongleModel] = useState<DongleModel>(loadSavedModel);
-  const dongleConn = useDongleConnection();
+  const dongleConn = useDongleConnection(dongleModel);
   const { connectionState, connect, disconnect, logs, clearLogs, data, applyNTNConfig, isReadLoopActive, startReadLoop, stopReadLoop } = dongleConn;
   const [driverMode, setDriverMode] = useState<DriverMode>(DriverMode.AUTO);
   const [activeTab, setActiveTab] = useState<Tab>('ntn');
@@ -202,7 +203,7 @@ const App: React.FC = () => {
               />
             </div>
 
-            {/* Column 2: Device Info & Status */}
+            {/* Column 2: Device Info, Status & (A2) LoRa Data */}
             <div className="space-y-6">
               <DashboardCard title="Device Information" accent="blue">
                 <div className="space-y-3">
@@ -248,6 +249,22 @@ const App: React.FC = () => {
                   </div>
                 </div>
               </DashboardCard>
+
+              {dongleModel === 'A2' && (
+                <DashboardCard title="LoRa Data" accent="blue">
+                  <div className="flex items-start gap-2">
+                    <div className="p-1.5 bg-purple-600/20 rounded border border-purple-500/30 shrink-0 mt-0.5">
+                      <RssIcon className="w-4 h-4 text-purple-400" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs text-slate-500 mb-1">AT+BISGET=? payload</div>
+                      <div className={`font-mono text-sm break-all ${data.loraData === '--' ? 'text-slate-500' : 'text-green-400'}`}>
+                        {data.loraData}
+                      </div>
+                    </div>
+                  </div>
+                </DashboardCard>
+              )}
             </div>
 
             {/* Column 3-4: Signal Metrics */}
