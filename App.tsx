@@ -251,22 +251,10 @@ const App: React.FC = () => {
                 </div>
               </DashboardCard>
 
-              {/* Row 3 (A2 only): LoRa Data spanning both inner columns */}
+              {/* Row 3 (A2 only): Serial Log moves here when LoRa Data is present */}
               {dongleModel === 'A2' && (
-                <div className="lg:col-span-2">
-                  <DashboardCard title="LoRa Data" accent="blue">
-                    <div className="flex items-start gap-2">
-                      <div className="p-1.5 bg-purple-600/20 rounded border border-purple-500/30 shrink-0 mt-0.5">
-                        <RssIcon className="w-4 h-4 text-purple-400" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="text-xs text-slate-500 mb-1">AT+BISGET=? payload</div>
-                        <div className={`font-mono text-sm break-all ${data.loraData === '--' ? 'text-slate-500' : 'text-green-400'}`}>
-                          {data.loraData}
-                        </div>
-                      </div>
-                    </div>
-                  </DashboardCard>
+                <div className="lg:col-span-2 h-80">
+                  <LogViewer logs={logs} onClear={clearLogs} />
                 </div>
               )}
             </div>
@@ -297,10 +285,28 @@ const App: React.FC = () => {
                  </div>
               </DashboardCard>
               
-              {/* Log Section spans full width of this column */}
-              <div className="md:col-span-2 h-80">
-                 <LogViewer logs={logs} onClear={clearLogs} />
-              </div>
+              {/* Log Section or LoRa Data spans full width of this column */}
+              {dongleModel === 'A2' ? (
+                <div className="md:col-span-2">
+                  <DashboardCard title="LoRa Data" accent="blue">
+                    <div className="flex items-start gap-2">
+                      <div className="p-1.5 bg-purple-600/20 rounded border border-purple-500/30 shrink-0 mt-0.5">
+                        <RssIcon className="w-4 h-4 text-purple-400" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs text-slate-500 mb-1">AT+BISGET=? payload</div>
+                        <div className={`font-mono text-sm break-all ${data.loraData === '--' ? 'text-slate-500' : 'text-green-400'}`}>
+                          {data.loraData}
+                        </div>
+                      </div>
+                    </div>
+                  </DashboardCard>
+                </div>
+              ) : (
+                <div className="md:col-span-2 h-80">
+                  <LogViewer logs={logs} onClear={clearLogs} />
+                </div>
+              )}
             </div>
           </div>
         )}
