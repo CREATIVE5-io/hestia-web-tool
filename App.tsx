@@ -236,6 +236,7 @@ const App: React.FC = () => {
               <ConfigPanel
                 onApplyConfig={applyNTNConfig}
                 isConnected={isConnected}
+                deviceConfig={data.currentConfig}
               />
 
               <DashboardCard title="NTN Dongle Status" accent="blue">

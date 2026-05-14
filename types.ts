@@ -38,6 +38,7 @@ export interface DongleData {
   loraData: string;
   lastUpdated: number;
   configApplied?: boolean;
+  currentConfig?: NTNConfig;
 }
 
 export interface NTNConfig {

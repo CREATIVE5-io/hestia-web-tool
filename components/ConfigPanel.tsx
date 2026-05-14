@@ -1,18 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { NTNConfig } from '../types';
-import { CogIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline';
+import { CogIcon, ExclamationTriangleIcon, ArrowDownTrayIcon } from '@heroicons/react/24/outline';
 
 interface ConfigPanelProps {
   onApplyConfig: (config: NTNConfig) => Promise<void>;
   isConnected: boolean;
   configApplied?: boolean;
+  deviceConfig?: NTNConfig;
 }
 
 const CONFIG_STORAGE_KEY = 'ntn-dongle-config';
 
+
 export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   onApplyConfig,
-  isConnected
+  isConnected,
+  deviceConfig,
 }) => {
   const [config, setConfig] = useState<NTNConfig>({
     apn: '',
@@ -25,6 +28,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   const [useDefault, setUseDefault] = useState(false);
   const [savedConfig, setSavedConfig] = useState<NTNConfig | null>(null);
   const [applyError, setApplyError] = useState<string | null>(null);
+  const [deviceConfigLoaded, setDeviceConfigLoaded] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem(CONFIG_STORAGE_KEY);
@@ -40,6 +44,24 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
       }
     }
   }, [useDefault]);
+
+  useEffect(() => {
+    if (!isConnected) setDeviceConfigLoaded(false);
+  }, [isConnected]);
+
+  // Populate form with values read from the device after Connect
+  useEffect(() => {
+    if (!deviceConfig) return;
+    const hasValues = deviceConfig.apn || deviceConfig.remoteIp || deviceConfig.remotePort;
+    if (!hasValues) return;
+    setConfig({
+      apn: deviceConfig.apn || '',
+      remoteIp: deviceConfig.remoteIp || '',
+      remotePort: deviceConfig.remotePort || '',
+      localPort: deviceConfig.localPort || '55001',
+    });
+    setDeviceConfigLoaded(true);
+  }, [deviceConfig]);
 
   const saveConfig = (newConfig: NTNConfig) => {
     localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(newConfig));
@@ -88,10 +110,16 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
         <div className="p-1.5 bg-orange-600/20 rounded border border-orange-500/30">
           <CogIcon className="w-4 h-4 text-orange-400" />
         </div>
-        <div>
+        <div className="flex-1">
           <h2 className="text-lg font-bold text-white">NTN Configuration</h2>
           <p className="text-slate-400 text-xs">Configure APN and connection settings</p>
         </div>
+        {deviceConfigLoaded && (
+          <div className="flex items-center gap-1 px-2 py-1 bg-green-900/30 border border-green-700/40 rounded text-xs text-green-400">
+            <ArrowDownTrayIcon className="w-3 h-3" />
+            <span>From device</span>
+          </div>
+        )}
       </div>
 
       {showReconnectPrompt && (

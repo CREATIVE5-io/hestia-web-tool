@@ -90,14 +90,14 @@ export function hexStringWithASCII(data: Uint8Array | number[]): string {
 export function parseModbusString(registers: number[]): string {
   let str = '';
   for (const reg of registers) {
-    // Big Endian bytes in register
     const hi = (reg >> 8) & 0xFF;
     const lo = reg & 0xFF;
-    if (hi !== 0) str += String.fromCharCode(hi);
-    if (lo !== 0) str += String.fromCharCode(lo);
+    if (hi === 0) break;
+    str += String.fromCharCode(hi);
+    if (lo === 0) break;
+    str += String.fromCharCode(lo);
   }
-  // Trim null terminators or garbage
-  return str.replace(/\0/g, '').trim();
+  return str.trim();
 }
 
 export function stringToModbusRegisters(input: string): number[] {

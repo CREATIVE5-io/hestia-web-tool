@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { ConnectionState, LogEntry, DongleData, MODBUS_CONSTANTS, SerialPort, DriverMode, NTNConfig, PCIE2CommandResult } from '../types';
 import type { DongleModel } from '../components/DongleModelPanel';
-import { buildReadInputRegisters, buildWriteMultipleRegisters, hexString, parseModbusString, stringToModbusRegisters, atCommandToModbusRegisters, parseReadInputRegistersResponse } from '../utils/modbus';
+import { buildReadInputRegisters, buildReadHoldingRegisters, buildWriteMultipleRegisters, hexString, parseModbusString, stringToModbusRegisters, atCommandToModbusRegisters, parseReadInputRegistersResponse } from '../utils/modbus';
 // @ts-ignore - The polyfill types aren't always perfect, ignore for build safety
 import { serial as polyfillSerial } from 'web-serial-polyfill';
 
@@ -274,6 +274,46 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1') => {
         }
         return newState;
       });
+    } else if (funcCode === MODBUS_CONSTANTS.READ_HOLDING_REGISTERS) {
+      const byteCount = buffer[2];
+      const dataBytes = buffer.slice(3, 3 + byteCount);
+      const registers: number[] = [];
+      for (let i = 0; i < dataBytes.length; i += 2) {
+        if (i + 1 < dataBytes.length) registers.push((dataBytes[i] << 8) | dataBytes[i + 1]);
+      }
+
+      setData(prev => {
+        const newState = { ...prev, lastUpdated: Date.now() };
+        const cfg = prev.currentConfig || { apn: '', remoteIp: '', remotePort: '', localPort: '' };
+
+        switch (lastCommandRef.current) {
+          case 'CONFIG_APN': {
+            const val = parseModbusString(registers);
+            parsedInfo = `APN (device): ${val}`;
+            newState.currentConfig = { ...cfg, apn: val };
+            break;
+          }
+          case 'CONFIG_REMOTE_IP': {
+            const val = parseModbusString(registers);
+            parsedInfo = `Remote IP (device): ${val}`;
+            newState.currentConfig = { ...cfg, remoteIp: val };
+            break;
+          }
+          case 'CONFIG_REMOTE_PORT': {
+            const val = parseModbusString(registers);
+            parsedInfo = `Remote Port (device): ${val}`;
+            newState.currentConfig = { ...cfg, remotePort: val };
+            break;
+          }
+          case 'CONFIG_LOCAL_PORT': {
+            const val = parseModbusString(registers);
+            parsedInfo = `Local Port (device): ${val}`;
+            newState.currentConfig = { ...cfg, localPort: val };
+            break;
+          }
+        }
+        return newState;
+      });
     } else if (funcCode === MODBUS_CONSTANTS.WRITE_MULTIPLE_REGISTERS) {
       parsedInfo = "Write Command Ack";
     }
@@ -302,7 +342,7 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1') => {
             const funcCode = responseBufferRef.current[1];
             let expectedLength = 0;
             
-            if (funcCode === 0x04) { // Read Input Registers
+            if (funcCode === 0x04 || funcCode === 0x03) { // Read Input / Holding Registers
               const byteCount = responseBufferRef.current[2];
               expectedLength = 3 + byteCount + 2; // header + data + CRC
             } else if (funcCode === 0x10) { // Write Multiple Registers
@@ -387,7 +427,7 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1') => {
 
   const pollStaticInfo = async () => {
     if (!keepReadingRef.current) return;
-    
+
     lastCommandRef.current = 'MODEL';
     await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_MODEL_NAME, 5));
     await sleep(200);
@@ -399,6 +439,31 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1') => {
     lastCommandRef.current = 'IMSI';
     await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_IMSI, 8));
     await sleep(200);
+
+    await pollCurrentConfig();
+  };
+
+  const pollCurrentConfig = async () => {
+    if (!keepReadingRef.current) return;
+    addLog('SYS', 'Reading current device configuration...');
+
+    lastCommandRef.current = 'CONFIG_REMOTE_PORT';
+    await sendModbusRequest(buildReadHoldingRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_REMOTE_PORT, 3));
+    await sleep(200);
+
+    lastCommandRef.current = 'CONFIG_APN';
+    await sendModbusRequest(buildReadHoldingRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_APN, 15));
+    await sleep(200);
+
+    lastCommandRef.current = 'CONFIG_REMOTE_IP';
+    await sendModbusRequest(buildReadHoldingRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_REMOTE_IP, 11));
+    await sleep(200);
+
+    lastCommandRef.current = 'CONFIG_LOCAL_PORT';
+    await sendModbusRequest(buildReadHoldingRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_LOCAL_PORT, 3));
+    await sleep(200);
+
+    addLog('SYS', 'Device configuration read complete.');
   };
 
   const pollStatus = async () => {
