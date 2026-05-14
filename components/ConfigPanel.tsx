@@ -11,6 +11,13 @@ interface ConfigPanelProps {
 
 const CONFIG_STORAGE_KEY = 'ntn-dongle-config';
 
+const DEFAULT_CONFIG: NTNConfig = {
+  apn: 'vpnus.mono',
+  remoteIp: '172.31.79.129',
+  remotePort: '7000',
+  localPort: '55001',
+};
+
 
 export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   onApplyConfig,
@@ -70,12 +77,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   const handleDefaultToggle = (checked: boolean) => {
     setUseDefault(checked);
     if (checked) {
-      setConfig({
-        apn: '',
-        remoteIp: '',
-        remotePort: '',
-        localPort: '55001'
-      });
+      setConfig(DEFAULT_CONFIG);
     } else if (savedConfig) {
       setConfig(savedConfig);
     }
