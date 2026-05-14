@@ -5,9 +5,20 @@ import { buildReadInputRegisters, buildReadHoldingRegisters, buildWriteMultipleR
 // @ts-ignore - The polyfill types aren't always perfect, ignore for build safety
 import { serial as polyfillSerial } from 'web-serial-polyfill';
 
+const LOG_STORAGE_KEY = 'ntn-serial-log';
+const LOG_MAX = 500;
+
+function loadPersistedLogs(): LogEntry[] {
+  try {
+    const raw = localStorage.getItem(LOG_STORAGE_KEY);
+    if (raw) return JSON.parse(raw) as LogEntry[];
+  } catch { /* ignore */ }
+  return [];
+}
+
 export const useDongleConnection = (dongleModel: DongleModel = 'A1') => {
   const [connectionState, setConnectionState] = useState<ConnectionState>(ConnectionState.DISCONNECTED);
-  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [logs, setLogs] = useState<LogEntry[]>(loadPersistedLogs);
   const [isReadLoopActive, setIsReadLoopActive] = useState(false);
   const [data, setData] = useState<DongleData>({
     modelName: '--',
@@ -52,12 +63,14 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1') => {
         message,
         isError
       };
-      // Append newest at the end so LogViewer's bottomRef auto-scroll reaches the latest entry
-      return [...prev.slice(-99), newLog];
+      const updated = [...prev.slice(-(LOG_MAX - 1)), newLog];
+      try { localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify(updated)); } catch { /* quota exceeded */ }
+      return updated;
     });
   }, []);
 
   const clearLogs = useCallback(() => {
+    localStorage.removeItem(LOG_STORAGE_KEY);
     setLogs([]);
   }, []);
 
