@@ -90,6 +90,17 @@ class WebSerialAdapter implements IoAdapter {
 
 // ── Hook ─────────────────────────────────────────────────────────────────────
 
+const LOG_STORAGE_KEY = 'fw-serial-log';
+const LOG_MAX = 500;
+
+function loadPersistedLogs(): LogEntry[] {
+  try {
+    const raw = localStorage.getItem(LOG_STORAGE_KEY);
+    if (raw) return JSON.parse(raw) as LogEntry[];
+  } catch { /* ignore */ }
+  return [];
+}
+
 export type FirmwareUpdateStatus = 'idle' | 'running' | 'done' | 'error';
 
 export interface StartUpdateOptions {
@@ -101,7 +112,7 @@ export function useFirmwareUpdate() {
   const [status, setStatus]         = useState<FirmwareUpdateStatus>('idle');
   const [phase, setPhase]           = useState<UpdatePhase>('idle');
   const [progress, setProgress]     = useState(0);
-  const [logs, setLogs]             = useState<LogEntry[]>([]);
+  const [logs, setLogs]             = useState<LogEntry[]>(loadPersistedLogs);
   const [errorMsg, setErrorMsg]     = useState<string | null>(null);
   const [portSelected, setPortSelected] = useState(false);
 
@@ -110,12 +121,16 @@ export function useFirmwareUpdate() {
   const portRef = useRef<any>(null);
 
   const addLog = (dir: LogDirection, message: string) => {
-    setLogs(prev => [...prev, {
-      id: crypto.randomUUID(),
-      timestamp: new Date().toLocaleTimeString(),
-      direction: dir,
-      message,
-    }]);
+    setLogs(prev => {
+      const updated = [...prev.slice(-(LOG_MAX - 1)), {
+        id: crypto.randomUUID(),
+        timestamp: new Date().toLocaleTimeString(),
+        direction: dir,
+        message,
+      }];
+      try { localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify(updated)); } catch { /* quota exceeded */ }
+      return updated;
+    });
   };
 
   const getSerialAPI = (driverMode: DriverMode): typeof polyfillSerial => {
@@ -155,6 +170,7 @@ export function useFirmwareUpdate() {
     setStatus('running');
     setPhase('idle');
     setProgress(0);
+    localStorage.removeItem(LOG_STORAGE_KEY);
     setLogs([]);
     setErrorMsg(null);
 
@@ -184,7 +200,10 @@ export function useFirmwareUpdate() {
     }
   };
 
-  const clearLogs = () => setLogs([]);
+  const clearLogs = () => {
+    localStorage.removeItem(LOG_STORAGE_KEY);
+    setLogs([]);
+  };
 
   return {
     status, phase, progress, logs, errorMsg,
