@@ -4,6 +4,17 @@ import { buildWriteMultipleRegisters, buildReadInputRegisters, atCommandToModbus
 // @ts-ignore
 import { serial as polyfillSerial } from 'web-serial-polyfill';
 
+const LOG_STORAGE_KEY = 'lora-serial-log';
+const LOG_MAX = 500;
+
+function loadPersistedLogs(): LogEntry[] {
+  try {
+    const raw = localStorage.getItem(LOG_STORAGE_KEY);
+    if (raw) return JSON.parse(raw) as LogEntry[];
+  } catch { /* ignore */ }
+  return [];
+}
+
 export const useLoRaConnection = () => {
   // Independent serial connection state
   const [connectionState, setConnectionState] = useState<ConnectionState>(ConnectionState.DISCONNECTED);
@@ -24,7 +35,7 @@ export const useLoRaConnection = () => {
   const [isSetupInProgress, setIsSetupInProgress] = useState(false);
   const [serialPorts, setSerialPorts] = useState<Array<{ port: string; description: string }>>([]);
   const [loraStatus, setLoraStatus] = useState<{ frequency: string; sf: string; channelPlan: string }>({ frequency: '--', sf: '--', channelPlan: '--' });
-  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [logs, setLogs] = useState<LogEntry[]>(loadPersistedLogs);
 
   const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
@@ -38,10 +49,17 @@ export const useLoRaConnection = () => {
       message,
       isError,
     };
-    setLogs(prev => [...prev.slice(-499), newLog]);
+    setLogs(prev => {
+      const updated = [...prev.slice(-(LOG_MAX - 1)), newLog];
+      try { localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify(updated)); } catch { /* quota exceeded */ }
+      return updated;
+    });
   }, []);
 
-  const clearLogs = useCallback(() => setLogs([]), []);
+  const clearLogs = useCallback(() => {
+    localStorage.removeItem(LOG_STORAGE_KEY);
+    setLogs([]);
+  }, []);
 
   // Serial write function
   const writeBytes = async (bytes: Uint8Array) => {
