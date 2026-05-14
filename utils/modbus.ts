@@ -209,6 +209,23 @@ export function parseReadInputRegistersResponse(response: Uint8Array): { registe
 }
 
 /**
+ * Parse Modbus Read Holding Registers response (funcCode 0x03)
+ * Same frame layout as Read Input Registers but funcCode differs.
+ */
+export function parseHoldingRegistersResponse(response: Uint8Array): { registers: number[]; success: boolean } {
+  if (response.length < 5) return { registers: [], success: false };
+  if (response[1] !== 0x03) return { registers: [], success: false };
+  const byteCount = response[2];
+  if (response.length < 3 + byteCount + 2) return { registers: [], success: false };
+  const dataBytes = response.slice(3, 3 + byteCount);
+  const registers: number[] = [];
+  for (let i = 0; i + 1 < dataBytes.length; i += 2) {
+    registers.push((dataBytes[i] << 8) | dataBytes[i + 1]);
+  }
+  return { registers, success: true };
+}
+
+/**
  * Parse Modbus Write Multiple Registers response (echo)
  * Response format: [SlaveID] [FuncCode=0x10] [StartAddr_HI] [StartAddr_LO] [Quantity_HI] [Quantity_LO] [CRC_LO] [CRC_HI]
  * Returns: { success: boolean, startAddr: number, quantity: number }
