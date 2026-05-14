@@ -53,7 +53,12 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   }, [useDefault]);
 
   useEffect(() => {
-    if (!isConnected) setDeviceConfigLoaded(false);
+    if (!isConnected) {
+      setDeviceConfigLoaded(false);
+      setShowReconnectPrompt(false);
+    } else {
+      setUseDefault(false);
+    }
   }, [isConnected]);
 
   // Populate form with values read from the device after Connect
