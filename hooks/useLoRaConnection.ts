@@ -647,6 +647,14 @@ export const useLoRaConnection = () => {
       if (!chResult.success) throw new Error('Failed to set channel plan');
       await sleep(500);
 
+      const saveResult = await sendPCIE2Command('AT+BISS');
+      if (!saveResult.success) throw new Error('Failed to save configuration');
+      await sleep(500);
+
+      const resetResult = await sendPCIE2Command('ATZ');
+      if (!resetResult.success) throw new Error('Failed to reset module');
+      await sleep(500);
+
       setSetupProgress({ stage: 'config', current: 3, total: 3, message: 'Configuration complete!' });
       setConfig(targetConfig);
       await testLoRaCommands();

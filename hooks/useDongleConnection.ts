@@ -212,10 +212,11 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1') => {
         if (i+1 < dataBytes.length) registers.push((dataBytes[i] << 8) | dataBytes[i+1]);
       }
 
+      const command = lastCommandRef.current;
       setData(prev => {
         const newState = { ...prev, lastUpdated: Date.now() };
-        
-        switch(lastCommandRef.current) {
+
+        switch(command) {
           case 'STATUS': {
              const val = registers[0];
              const statusObj = {
