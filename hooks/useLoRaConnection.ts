@@ -361,6 +361,9 @@ export const useLoRaConnection = () => {
       if (!device.appEUI || device.appEUI.length !== 16) {
         return { valid: false, error: 'AppEUI must be exactly 16 hex characters' };
       }
+      if (!device.otaaAppKey || device.otaaAppKey.length !== 32) {
+        return { valid: false, error: 'OTAA AppKey must be exactly 32 hex characters' };
+      }
     }
     return { valid: true };
   };
@@ -494,8 +497,8 @@ export const useLoRaConnection = () => {
 
         // Send OTAA parameters if OTAA mode is enabled
         // Format: AT+BISOTAA={idx}:{AppEUI 16chars}:{DevEUI 16chars}:{AppKey 32chars}
-        if (device.otaaMode && device.appEUI && device.devEUI) {
-          const otaaCmd = `AT+BISOTAA=${device.idx}:${device.appEUI}:${device.devEUI}:${device.appKey}`;
+        if (device.otaaMode && device.appEUI && device.devEUI && device.otaaAppKey) {
+          const otaaCmd = `AT+BISOTAA=${device.idx}:${device.appEUI}:${device.devEUI}:${device.otaaAppKey}`;
           const otaaResult = await sendPCIE2Command(otaaCmd);
           if (!otaaResult.success) throw new Error('Failed to set OTAA parameters');
           await sleep(500);
@@ -714,14 +717,15 @@ export const useLoRaConnection = () => {
         await sleep(300);
         if (otaaResult.success && otaaResult.data) {
           // Response format: [idx] DevEUI:value,AppEUI:value,AppKey:value OK
-          const otaaMatch = otaaResult.data.match(/DevEUI:([0-9a-fA-F]{16}),AppEUI:([0-9a-fA-F]{16})/i);
+          const otaaMatch = otaaResult.data.match(/DevEUI:([0-9a-fA-F]{16}),AppEUI:([0-9a-fA-F]{16})(?:,AppKey:([0-9a-fA-F]{32}))?/i);
           if (otaaMatch) {
-            const [, devEUI, appEUI] = otaaMatch;
+            const [, devEUI, appEUI, otaaAppKey] = otaaMatch;
             const nullEUI = 'ffffffffffffffff';
             if (appEUI.toLowerCase() !== nullEUI && devEUI.toLowerCase() !== nullEUI) {
               foundDevices[i].appEUI = appEUI;
               foundDevices[i].devEUI = devEUI;
               foundDevices[i].otaaMode = true;
+              if (otaaAppKey) foundDevices[i].otaaAppKey = otaaAppKey;
             }
           }
         }

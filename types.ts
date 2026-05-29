@@ -145,6 +145,7 @@ export interface LoRaDevice {
   otaaMode?: boolean;
   devEUI?: string;
   appEUI?: string;
+  otaaAppKey?: string;
 }
 
 export interface LoRaConfig {

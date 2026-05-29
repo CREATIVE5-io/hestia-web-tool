@@ -53,6 +53,7 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
     otaaMode: false,
     devEUI: '',
     appEUI: '',
+    otaaAppKey: '',
   });
 
   const [selectedDevices, setSelectedDevices] = useState<Set<string>>(new Set());
@@ -149,6 +150,10 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
         setAddDeviceError('AppEUI must be exactly 16 characters');
         return;
       }
+      if (!newDevice.otaaAppKey || newDevice.otaaAppKey.length !== 32) {
+        setAddDeviceError('OTAA AppKey must be exactly 32 characters');
+        return;
+      }
     }
 
     const success = await addDevice(newDevice as LoRaDevice);
@@ -162,6 +167,7 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
         otaaMode: false,
         devEUI: '',
         appEUI: '',
+        otaaAppKey: '',
       });
     }
   };
@@ -364,6 +370,7 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
                   <th className="text-left py-3 px-3 font-semibold text-slate-400">App Section Key</th>
                   <th className="text-left py-3 px-3 font-semibold text-slate-400">DevEUI</th>
                   <th className="text-left py-3 px-3 font-semibold text-slate-400">AppEUI</th>
+                  <th className="text-left py-3 px-3 font-semibold text-slate-400">OTAA AppKey</th>
                 </tr>
               </thead>
               <tbody>
@@ -390,6 +397,9 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
                     </td>
                     <td className="py-3 px-3 font-mono text-xs text-slate-400">
                       {device.appEUI || <span className="text-slate-600">—</span>}
+                    </td>
+                    <td className="py-3 px-3 font-mono text-xs text-slate-400 truncate" title={device.otaaAppKey}>
+                      {device.otaaAppKey || <span className="text-slate-600">—</span>}
                     </td>
                   </tr>
                 ))}
@@ -562,6 +572,26 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
                 }`}
               />
             </div>
+          </div>
+
+          <div>
+            <label className={`block text-sm font-medium mb-2 ${newDevice.otaaMode ? 'text-slate-300' : 'text-slate-600'}`}>
+              OTAA AppKey (32 characters)
+            </label>
+            <input
+              type="text"
+              name="otaaAppKey"
+              value={newDevice.otaaAppKey}
+              onChange={handleNewDeviceChange}
+              maxLength={32}
+              placeholder="00000000000000000000000000000000"
+              disabled={!newDevice.otaaMode}
+              className={`w-full border rounded-lg px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-green-500 transition-colors ${
+                newDevice.otaaMode
+                  ? 'bg-slate-900 border-slate-600 text-slate-200'
+                  : 'bg-slate-900/40 border-slate-700 text-slate-600 cursor-not-allowed'
+              }`}
+            />
           </div>
 
           <button
