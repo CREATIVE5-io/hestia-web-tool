@@ -493,56 +493,39 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1') => {
       throw new Error('Device not ready for configuration');
     }
 
+    // Pause polling so the bus is quiet during writes
+    if (pollIntervalRef.current) {
+      window.clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+
     addLog('SYS', 'Applying NTN Configuration...');
 
+    const writeConfig = async (label: string, addr: number, value: string) => {
+      const data = stringToModbusRegisters(value);
+      const resp = await sendModbusRequest(
+        buildWriteMultipleRegisters(MODBUS_CONSTANTS.SLAVE_ID, addr, data),
+        3000
+      );
+      if (!resp) throw new Error(`Write timeout for ${label}`);
+      await sleep(200);
+      addLog('SYS', `${label} set: ${value}`);
+    };
+
     try {
-      // Set Remote Port
-      const remotePortData = stringToModbusRegisters(config.remotePort);
-      await sendModbusRequest(buildWriteMultipleRegisters(
-        MODBUS_CONSTANTS.SLAVE_ID,
-        MODBUS_CONSTANTS.ADDR_REMOTE_PORT,
-        remotePortData
-      ));
-      await sleep(200);
-      addLog('SYS', `Remote Port set: ${config.remotePort}`);
-
-      // Set APN
-      const apnData = stringToModbusRegisters(config.apn);
-      await sendModbusRequest(buildWriteMultipleRegisters(
-        MODBUS_CONSTANTS.SLAVE_ID,
-        MODBUS_CONSTANTS.ADDR_APN,
-        apnData
-      ));
-      await sleep(200);
-      addLog('SYS', `APN set: ${config.apn}`);
-
-      // Set Remote IP
-      const remoteIpData = stringToModbusRegisters(config.remoteIp);
-      await sendModbusRequest(buildWriteMultipleRegisters(
-        MODBUS_CONSTANTS.SLAVE_ID,
-        MODBUS_CONSTANTS.ADDR_REMOTE_IP,
-        remoteIpData
-      ));
-      await sleep(200);
-      addLog('SYS', `Remote IP set: ${config.remoteIp}`);
-
-      // Set Local Port (default to 55001 if not provided)
-      const localPort = config.localPort || '55001';
-      const localPortData = stringToModbusRegisters(localPort);
-      await sendModbusRequest(buildWriteMultipleRegisters(
-        MODBUS_CONSTANTS.SLAVE_ID,
-        MODBUS_CONSTANTS.ADDR_LOCAL_PORT,
-        localPortData
-      ));
-      await sleep(200);
-      addLog('SYS', `Local Port set: ${localPort}`);
+      await writeConfig('Remote Port', MODBUS_CONSTANTS.ADDR_REMOTE_PORT, config.remotePort);
+      await writeConfig('APN', MODBUS_CONSTANTS.ADDR_APN, config.apn);
+      await writeConfig('Remote IP', MODBUS_CONSTANTS.ADDR_REMOTE_IP, config.remoteIp);
+      await writeConfig('Local Port', MODBUS_CONSTANTS.ADDR_LOCAL_PORT, config.localPort || '55001');
 
       setData(prev => ({ ...prev, configApplied: true }));
       addLog('SYS', 'Configuration applied successfully!');
-
     } catch (error) {
       addLog('SYS', `Configuration failed: ${error}`, true);
       throw error;
+    } finally {
+      // Resume polling
+      startPolling();
     }
   };
 
