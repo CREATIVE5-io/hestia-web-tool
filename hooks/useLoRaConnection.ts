@@ -635,6 +635,10 @@ export const useLoRaConnection = () => {
     setError(null);
     
     try {
+      const fmtResult = await sendPCIE2Command(`AT+BISFMT=1`);
+      if (!fmtResult.success) throw new Error('Failed to set FMT=1');
+      await sleep(500);
+
       setSetupProgress({ stage: 'config', current: 0, total: 3, message: 'Setting frequency...' });
       const freqResult = await sendPCIE2Command(`AT+BISRXF=${targetConfig.frequency}`);
       if (!freqResult.success) throw new Error('Failed to set frequency');
