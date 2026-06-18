@@ -7,7 +7,6 @@ interface LogViewerProps {
 }
 
 export const LogViewer: React.FC<LogViewerProps> = ({ logs, onClear }) => {
-  const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
 
@@ -19,8 +18,8 @@ export const LogViewer: React.FC<LogViewerProps> = ({ logs, onClear }) => {
   };
 
   useEffect(() => {
-    if (autoScroll && bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (autoScroll && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [logs, autoScroll]);
 
@@ -67,7 +66,6 @@ export const LogViewer: React.FC<LogViewerProps> = ({ logs, onClear }) => {
                 </span>
               </div>
             ))}
-            <div ref={bottomRef} />
           </div>
         )}
       </div>
