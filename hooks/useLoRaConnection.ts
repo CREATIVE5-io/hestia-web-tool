@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import { LoRaConfig, LoRaDevice, LoRaSetupProgress, MODBUS_CONSTANTS, ConnectionState, SerialPort, PCIE2CommandResult, LogEntry } from '../types';
+import { LoRaConfig, LoRaDevice, EightChDevice, LoRaSetupProgress, MODBUS_CONSTANTS, ConnectionState, SerialPort, PCIE2CommandResult, LogEntry } from '../types';
 import { buildWriteMultipleRegisters, buildReadInputRegisters, atCommandToModbusRegisters, parseReadInputRegistersResponse } from '../utils/modbus';
 // @ts-ignore
 import { serial as polyfillSerial } from 'web-serial-polyfill';
@@ -29,13 +29,33 @@ export const useLoRaConnection = () => {
   
   const [config, setConfig] = useState<LoRaConfig | null>(null);
   const [devices, setDevices] = useState<Record<string, LoRaDevice>>({});
+  const [eightChDevices, setEightChDevices] = useState<Record<string, EightChDevice>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [setupProgress, setSetupProgress] = useState<LoRaSetupProgress | null>(null);
   const [isSetupInProgress, setIsSetupInProgress] = useState(false);
   const [serialPorts, setSerialPorts] = useState<Array<{ port: string; description: string }>>([]);
   const [loraStatus, setLoraStatus] = useState<{ frequency: string; sf: string; channelPlan: string }>({ frequency: '--', sf: '--', channelPlan: '--' });
+  const [loraModule, setLoraModuleState] = useState<'Single Channel' | '8 Channels'>('Single Channel');
+  const loraModuleRef = useRef<'Single Channel' | '8 Channels'>('Single Channel');
+  const chPlanCacheRef = useRef<string>('--');
   const [logs, setLogs] = useState<LogEntry[]>(loadPersistedLogs);
+
+  const setLoraModule = (module: 'Single Channel' | '8 Channels') => {
+    loraModuleRef.current = module;
+    setLoraModuleState(module);
+  };
+
+  const switchModuleStatus = (to: 'Single Channel' | '8 Channels') => {
+    if (to === 'Single Channel') {
+      setLoraStatus(prev => {
+        chPlanCacheRef.current = prev.channelPlan;
+        return { frequency: '--', sf: '--', channelPlan: '--' };
+      });
+    } else {
+      setLoraStatus({ frequency: '--', sf: '--', channelPlan: chPlanCacheRef.current });
+    }
+  };
 
   const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
@@ -317,9 +337,9 @@ export const useLoRaConnection = () => {
             
             // Only extract value after colon for query commands (not BISDEV/BISOTAA — return full raw data)
             if (!command.includes('BISDEV') && !command.includes('BISOTAA')) {
-              const match = responseData.match(/:\s*(\S+)/);
+              const match = responseData.match(/:\s*([^\r\n]+)/);
               if (match) {
-                responseData = match[1];
+                responseData = match[1].trim();
               }
             }
           }
@@ -391,22 +411,28 @@ export const useLoRaConnection = () => {
         await startReadLoop();
       }
 
-      if (!keepReadingRef.current) return;
-      const freqResult = await sendPCIE2Command('AT+BISRXF=?');
-      const frequency = freqResult.data || '--';
-      await sleep(500);
+      if (loraModuleRef.current === '8 Channels') {
+        if (!keepReadingRef.current) return;
+        const chResult = await sendPCIE2Command('AT+CHPLAN=?');
+        const channelPlan = chResult.data || '--';
+        chPlanCacheRef.current = channelPlan;
+        setLoraStatus({ frequency: '--', sf: '--', channelPlan });
+      } else {
+        if (!keepReadingRef.current) return;
+        const freqResult = await sendPCIE2Command('AT+BISRXF=?');
+        const frequency = freqResult.data || '--';
+        await sleep(500);
 
-      if (!keepReadingRef.current) return;
-      const sfResult = await sendPCIE2Command('AT+BISRXSF=?');
-      const sf = sfResult.data || '--';
-      await sleep(500);
+        if (!keepReadingRef.current) return;
+        const sfResult = await sendPCIE2Command('AT+BISRXSF=?');
+        const sf = sfResult.data || '--';
+        await sleep(500);
 
-      if (!keepReadingRef.current) return;
-      const chResult = await sendPCIE2Command('AT+BISCHPLAN=?');
-      const channelPlan = chResult.data || '--';
-      
-      // Update loraStatus with results
-      setLoraStatus({ frequency, sf, channelPlan });
+        if (!keepReadingRef.current) return;
+        const chResult = await sendPCIE2Command('AT+BISCHPLAN=?');
+        const channelPlan = chResult.data || '--';
+        setLoraStatus({ frequency, sf, channelPlan });
+      }
 
       setError(null);
     } catch (err) {
@@ -568,6 +594,55 @@ export const useLoRaConnection = () => {
     [devices]
   );
 
+  // Add an 8-channel device
+  const addEightChDevice = useCallback(async (device: EightChDevice): Promise<boolean> => {
+    if (!keepReadingRef.current) {
+      setError('Not connected to device');
+      return false;
+    }
+    try {
+      const cmd = `AT+BISDEV=${device.devEUI}:${device.devAddr}:${device.nwkSKey}:${device.appSKey}:${device.appEUI}:${device.appKey}:${device.mode}`;
+      const result = await sendPCIE2Command(cmd);
+      if (!result.success) throw new Error('Failed to add device to hardware');
+      await sleep(500);
+
+      setEightChDevices(prev => ({ ...prev, [device.devEUI]: device }));
+      setError(null);
+      return true;
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Failed to add device';
+      setError(errorMsg);
+      return false;
+    }
+  }, []);
+
+  // Delete 8-channel devices
+  const deleteEightChDevices = useCallback(async (devEUIs: string[]): Promise<boolean> => {
+    if (!keepReadingRef.current) {
+      setError('Not connected to device');
+      return false;
+    }
+    try {
+      for (const devEUI of devEUIs) {
+        const result = await sendPCIE2Command(`AT+BISDEV=${devEUI}:::`);
+        if (!result.success) throw new Error(`Failed to delete device ${devEUI}`);
+        await sleep(500);
+      }
+
+      setEightChDevices(prev => {
+        const updated = { ...prev };
+        devEUIs.forEach(id => delete updated[id]);
+        return updated;
+      });
+      setError(null);
+      return true;
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Failed to delete device';
+      setError(errorMsg);
+      return false;
+    }
+  }, []);
+
   // Clear all devices
   const clearDevices = useCallback(() => {
     setDevices({});
@@ -620,14 +695,39 @@ export const useLoRaConnection = () => {
       return;
     }
 
-    const validation = validateConfig(targetConfig);
-    if (!validation.valid) {
-      setError(validation.error || 'Invalid configuration');
+    if (!keepReadingRef.current) {
+      setError('Not connected to device');
       return;
     }
 
-    if (!keepReadingRef.current) {
-      setError('Not connected to device');
+    if (loraModuleRef.current === '8 Channels') {
+      setIsSetupInProgress(true);
+      setError(null);
+      try {
+        setSetupProgress({ stage: 'config', current: 0, total: 1, message: 'Setting channel plan...' });
+        const chResult = await sendPCIE2Command(`AT+CHPLAN=${targetConfig.ch_plan}`);
+        if (!chResult.success) throw new Error('Failed to set channel plan');
+        await sleep(500);
+
+        setSetupProgress({ stage: 'config', current: 1, total: 1, message: 'Configuration complete!' });
+        setConfig(targetConfig);
+        await testLoRaCommands();
+        setTimeout(() => {
+          setIsSetupInProgress(false);
+          setSetupProgress(null);
+        }, 2000);
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : 'Configuration failed';
+        setError(errorMsg);
+        setIsSetupInProgress(false);
+        setSetupProgress(null);
+      }
+      return;
+    }
+
+    const validation = validateConfig(targetConfig);
+    if (!validation.valid) {
+      setError(validation.error || 'Invalid configuration');
       return;
     }
 
@@ -745,6 +845,36 @@ export const useLoRaConnection = () => {
     }
   }, []);
 
+  // Query a single 8-channel device by DevEUI via AT+BISDEV=<DevEUI>
+  // Response format: DevEUI:DevAddr:NwkSKey:AppSKey:AppEUI:AppKey:Mode\r\nOK\r\n
+  const queryEightChDevice = useCallback(async (devEUI: string): Promise<EightChDevice | null> => {
+    if (!keepReadingRef.current) {
+      setError('Not connected to device');
+      return null;
+    }
+    try {
+      const result = await sendPCIE2Command(`AT+BISDEV=${devEUI}`);
+      if (result.success && result.data) {
+        const firstLine = result.data.split(/[\r\n]+/).find(l => l.includes(':'));
+        if (firstLine) {
+          const parts = firstLine.trim().split(':');
+          if (parts.length >= 4) {
+            const [rDevEUI, devAddr, nwkSKey, appSKey] = parts;
+            const appEUI = parts[4] ?? '';
+            const appKey = parts[5] ?? '';
+            const rawMode = (parts[6] ?? '').toUpperCase();
+            const mode: 'ABP' | 'OTAA' = rawMode === 'OTAA' ? 'OTAA' : 'ABP';
+            return { devEUI: rDevEUI, devAddr, nwkSKey, appSKey, appEUI, appKey, mode };
+          }
+        }
+      }
+      return null;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Query failed');
+      return null;
+    }
+  }, []);
+
   // Start LoRa devices setup with progress polling
   const startLoRaDevicesSetup = useCallback(async () => {
     if (!keepReadingRef.current) {
@@ -814,6 +944,9 @@ export const useLoRaConnection = () => {
     isSetupInProgress,
     serialPorts,
     loraStatus,
+    loraModule,
+    setLoraModule,
+    switchModuleStatus,
     logs,
     clearLogs,
     validateDevice,
@@ -824,6 +957,10 @@ export const useLoRaConnection = () => {
     addDevice,
     deleteDevices,
     clearDevices,
+    eightChDevices,
+    addEightChDevice,
+    deleteEightChDevices,
+    queryEightChDevice,
     fetchLoRaData,
     fetchSerialPorts,
     startLoRaConfigSetup,

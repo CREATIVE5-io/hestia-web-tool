@@ -156,6 +156,16 @@ export interface LoRaConfig {
   dongle_id?: string;
 }
 
+export interface EightChDevice {
+  devEUI: string;
+  devAddr: string;
+  nwkSKey: string;
+  appSKey: string;
+  appEUI: string;
+  appKey: string;
+  mode: 'ABP' | 'OTAA';
+}
+
 export interface LoRaSetupProgress {
   stage?: string;
   current?: number;
