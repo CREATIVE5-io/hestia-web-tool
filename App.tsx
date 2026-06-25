@@ -196,7 +196,7 @@ const App: React.FC = () => {
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-6">
             
             {/* Columns 1+2: inner 2-col grid so row-mates share the same height automatically */}
-            <div className="lg:col-span-2 xl:col-span-2 grid grid-cols-1 lg:grid-cols-2 gap-6 content-start">
+            <div className="lg:col-span-2 xl:col-span-2 grid grid-cols-1 lg:grid-cols-2 gap-6 lg:grid-rows-[auto_1fr]">
 
               {/* Row 1: Dongle Model | Device Information */}
               <DongleModelPanel model={dongleModel} onChange={setDongleModel} loraModule={loraModule} onLoraModuleChange={setLoraModule} disabled={isConnected} />
@@ -253,12 +253,6 @@ const App: React.FC = () => {
                 </div>
               </DashboardCard>
 
-              {/* Row 3 (A2 only): Serial Log moves here when LoRa Data is present */}
-              {dongleModel === 'A2' && (
-                <div className="lg:col-span-2 h-80">
-                  <LogViewer logs={logs} onClear={clearLogs} />
-                </div>
-              )}
             </div>
 
             {/* Column 3-4: Signal Metrics */}
@@ -286,9 +280,9 @@ const App: React.FC = () => {
                    <div className="mt-1 text-xs text-slate-500 text-center">Signal-to-Interference-plus-Noise Ratio</div>
                  </div>
               </DashboardCard>
-              
-              {/* Log Section or LoRa Data spans full width of this column */}
-              {dongleModel === 'A2' ? (
+
+              {/* LoRa Data (A2 only) */}
+              {dongleModel === 'A2' && (
                 <div className="md:col-span-2">
                   <DashboardCard title="LoRa DATA" accent="blue" noUppercase>
                     <div className="flex items-start gap-2">
@@ -306,11 +300,12 @@ const App: React.FC = () => {
                     </div>
                   </DashboardCard>
                 </div>
-              ) : (
-                <div className="md:col-span-2 h-80">
-                  <LogViewer logs={logs} onClear={clearLogs} />
-                </div>
               )}
+
+              {/* Serial Log */}
+              <div className="md:col-span-2 h-80">
+                <LogViewer logs={logs} onClear={clearLogs} />
+              </div>
             </div>
           </div>
         )}
