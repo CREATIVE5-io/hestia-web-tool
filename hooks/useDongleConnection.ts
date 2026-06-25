@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { ConnectionState, LogEntry, DongleData, MODBUS_CONSTANTS, SerialPort, DriverMode, NTNConfig, PCIE2CommandResult } from '../types';
-import type { DongleModel } from '../components/DongleModelPanel';
+import type { DongleModel, LoraModuleType } from '../components/DongleModelPanel';
 import { buildReadInputRegisters, buildReadHoldingRegisters, buildWriteMultipleRegisters, hexString, parseModbusString, stringToModbusRegisters, atCommandToModbusRegisters, parseReadInputRegistersResponse, parseHoldingRegistersResponse } from '../utils/modbus';
 // @ts-ignore - The polyfill types aren't always perfect, ignore for build safety
 import { serial as polyfillSerial } from 'web-serial-polyfill';
@@ -16,7 +16,7 @@ function loadPersistedLogs(): LogEntry[] {
   return [];
 }
 
-export const useDongleConnection = (dongleModel: DongleModel = 'A1') => {
+export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule: LoraModuleType = 'single-ch') => {
   const [connectionState, setConnectionState] = useState<ConnectionState>(ConnectionState.DISCONNECTED);
   const [logs, setLogs] = useState<LogEntry[]>(loadPersistedLogs);
   const [isReadLoopActive, setIsReadLoopActive] = useState(false);
@@ -48,6 +48,7 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1') => {
   const pcie2ResponseRef = useRef<{ length: number; data: Uint8Array | null }>({ length: 0, data: null });
   const isClosingRef = useRef<boolean>(false);
   const dongleModelRef = useRef<DongleModel>(dongleModel);
+  const loraModuleRef = useRef<LoraModuleType>(loraModule);
 
   // Response queue for request/response matching - supports multiple pending requests
   const responseResolveQueueRef = useRef<Array<(data: Uint8Array) => void>>([]);
@@ -132,6 +133,11 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1') => {
   useEffect(() => {
     dongleModelRef.current = dongleModel;
   }, [dongleModel]);
+
+  useEffect(() => {
+    loraModuleRef.current = loraModule;
+    setData(prev => ({ ...prev, loraData: '--' }));
+  }, [loraModule]);
 
   const writeBytes = async (bytes: Uint8Array) => {
     if (!portRef.current || !portRef.current.writable) return;
@@ -566,7 +572,7 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1') => {
 
       if (command === 'ATZ') {
         waitTime = 5000;
-      } else if (command.includes('AT+BISGET=')) {
+      } else if (command.includes('AT+BISGET=') || command === 'AT+BISULGET') {
         waitTime = 1000;
         respLenReg = MODBUS_CONSTANTS.PCIE2_DATA_LEN;
         respDataReg = MODBUS_CONSTANTS.PCIE2_DATA_START;
@@ -647,6 +653,16 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1') => {
                 }
                 responseData = new TextDecoder().decode(new Uint8Array(decoded));
               }
+            } else if (command === 'AT+BISULGET') {
+              // Response: +BISULGET: 01234567,48656c6c6f,m-75,9.5  or  +BISULGET: EMPTY
+              const bisulMatch = rawStr.match(/\+BISULGET:\s*(.+)/i);
+              if (bisulMatch) {
+                const content = bisulMatch[1].trim();
+                if (content.toUpperCase() !== 'EMPTY') {
+                  responseData = content;
+                }
+                // EMPTY → responseData stays '' → null returned below
+              }
             } else {
               const match = rawStr.match(/:\s*(\S+)/);
               responseData = match ? match[1] : rawStr.trim();
@@ -659,8 +675,8 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1') => {
 
       addLog('SYS', `PCIE2 CMD: Completed successfully`);
 
-      // AT+BISGET=? returns null when payload is empty ("") — caller must not update state
-      const resultData = command.startsWith('AT+BISGET=')
+      // AT+BISGET=? and AT+BISULGET return null when empty — caller must not update state
+      const resultData = (command.startsWith('AT+BISGET=') || command === 'AT+BISULGET')
         ? (responseData || null)
         : (responseData || 'OK');
       return {
@@ -742,8 +758,9 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1') => {
 
   const pollLoraData = async () => {
     if (!keepReadingRef.current) return;
-    const result = await sendPCIE2Command('AT+BISGET=?', 3);
-    // Only update when there is actual decoded payload; null means "" (empty) — keep last known value
+    const command = loraModuleRef.current === '8-ch' ? 'AT+BISULGET' : 'AT+BISGET=?';
+    const result = await sendPCIE2Command(command, 3);
+    // Only update when there is actual payload; null means empty — keep last known value
     if (result.success && result.data !== null) {
       setData(prev => ({ ...prev, loraData: result.data as string, lastUpdated: Date.now() }));
     }

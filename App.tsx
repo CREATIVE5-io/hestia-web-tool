@@ -7,8 +7,8 @@ import { LogViewer } from './components/LogViewer';
 import { ConfigPanel } from './components/ConfigPanel';
 import { LoRaConfig } from './components/LoRaConfig';
 import { FirmwareUpdate } from './components/FirmwareUpdate';
-import { DongleModelPanel, loadSavedModel } from './components/DongleModelPanel';
-import type { DongleModel } from './components/DongleModelPanel';
+import { DongleModelPanel, loadSavedModel, loadSavedLoraModule } from './components/DongleModelPanel';
+import type { DongleModel, LoraModuleType } from './components/DongleModelPanel';
 import {
   SignalIcon,
   WifiIcon,
@@ -24,7 +24,8 @@ type Tab = 'ntn' | 'lora' | 'firmware';
 
 const App: React.FC = () => {
   const [dongleModel, setDongleModel] = useState<DongleModel>(loadSavedModel);
-  const dongleConn = useDongleConnection(dongleModel);
+  const [loraModule, setLoraModule] = useState<LoraModuleType>(loadSavedLoraModule);
+  const dongleConn = useDongleConnection(dongleModel, loraModule);
   const { connectionState, connect, disconnect, logs, clearLogs, data, applyNTNConfig, isReadLoopActive, startReadLoop, stopReadLoop } = dongleConn;
   const [driverMode, setDriverMode] = useState<DriverMode>(DriverMode.AUTO);
   const [activeTab, setActiveTab] = useState<Tab>('ntn');
@@ -198,7 +199,7 @@ const App: React.FC = () => {
             <div className="lg:col-span-2 xl:col-span-2 grid grid-cols-1 lg:grid-cols-2 gap-6 content-start">
 
               {/* Row 1: Dongle Model | Device Information */}
-              <DongleModelPanel model={dongleModel} onChange={setDongleModel} />
+              <DongleModelPanel model={dongleModel} onChange={setDongleModel} loraModule={loraModule} onLoraModuleChange={setLoraModule} disabled={isConnected} />
 
               <DashboardCard title="Device Information" accent="blue">
                 <div className="space-y-3">
@@ -289,13 +290,15 @@ const App: React.FC = () => {
               {/* Log Section or LoRa Data spans full width of this column */}
               {dongleModel === 'A2' ? (
                 <div className="md:col-span-2">
-                  <DashboardCard title="LoRa Data" accent="blue">
+                  <DashboardCard title="LoRa DATA" accent="blue" noUppercase>
                     <div className="flex items-start gap-2">
                       <div className="p-1.5 bg-purple-600/20 rounded border border-purple-500/30 shrink-0 mt-0.5">
                         <RssIcon className="w-4 h-4 text-purple-400" />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="text-xs text-slate-500 mb-1">AT+BISGET=? payload</div>
+                        <div className="text-xs text-slate-500 mb-1">
+                          {loraModule === '8-ch' ? 'AT+BISULGET payload' : 'AT+BISGET=? payload'}
+                        </div>
                         <div className={`font-mono text-sm break-all ${data.loraData === '--' ? 'text-slate-500' : 'text-green-400'}`}>
                           {data.loraData}
                         </div>

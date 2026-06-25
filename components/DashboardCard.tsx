@@ -14,12 +14,13 @@ interface DashboardCardProps {
   children: React.ReactNode;
   className?: string;
   accent?: AccentColor;
+  noUppercase?: boolean;
 }
 
-export const DashboardCard: React.FC<DashboardCardProps> = ({ title, children, className = '', accent }) => {
+export const DashboardCard: React.FC<DashboardCardProps> = ({ title, children, className = '', accent, noUppercase }) => {
   return (
     <div className={`bg-slate-800 rounded-lg border border-slate-700 shadow-sm p-4 ${className}`}>
-      <h3 className={`text-sm font-semibold uppercase tracking-wider mb-3 pb-2 border-b border-slate-700/50 ${accent ? titleColors[accent] : 'text-slate-400'}`}>{title}</h3>
+      <h3 className={`text-sm font-semibold ${noUppercase ? '' : 'uppercase'} tracking-wider mb-3 pb-2 border-b border-slate-700/50 ${accent ? titleColors[accent] : 'text-slate-400'}`}>{title}</h3>
       <div>{children}</div>
     </div>
   );
