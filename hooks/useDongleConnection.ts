@@ -49,6 +49,7 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
   const isClosingRef = useRef<boolean>(false);
   const dongleModelRef = useRef<DongleModel>(dongleModel);
   const loraModuleRef = useRef<LoraModuleType>(loraModule);
+  const lastExpectedResponseBytesRef = useRef<number | null>(null);
 
   // Response queue for request/response matching - supports multiple pending requests
   const responseResolveQueueRef = useRef<Array<(data: Uint8Array) => void>>([]);
@@ -152,6 +153,14 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
   };
 
   const sendModbusRequest = async (request: Uint8Array, timeout: number = 2000): Promise<Uint8Array | null> => {
+    // Record expected response byte count so the read loop can discard stale/mismatched frames
+    if (request.length >= 6 && (request[1] === 0x03 || request[1] === 0x04)) {
+      const count = (request[4] << 8) | request[5];
+      lastExpectedResponseBytesRef.current = count * 2;
+    } else {
+      lastExpectedResponseBytesRef.current = null; // write commands: no byte-count validation
+    }
+
     await writeBytes(request);
     
     // Check if read loop is active
@@ -335,24 +344,36 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
             if (expectedLength > 0 && responseBufferRef.current.length >= expectedLength) {
               const completeFrame = responseBufferRef.current.slice(0, expectedLength);
               responseBufferRef.current = responseBufferRef.current.slice(expectedLength);
-              
-              // Dispatch to pending response handler
-              if (responseResolveQueueRef.current.length > 0) {
-                const resolver = responseResolveQueueRef.current.shift();
-                if (resolver) {
-                  resolver(completeFrame);
-                }
-              }
-              
-              // Process for context-based parsing
-              const parsedStr = processIncomingDataWithContext(completeFrame);
+
               const ascii = Array.from(completeFrame)
                 .map(b => (b >= 32 && b <= 126) ? String.fromCharCode(b) : '.')
                 .join('');
-              const logMsg = parsedStr 
-                ? `${hexString(completeFrame)} (${ascii}) | ${parsedStr}` 
-                : `${hexString(completeFrame)} (${ascii})`;
-              addLog('RX', logMsg);
+
+              // For read-register responses, validate byte count matches what was requested.
+              // A mismatch means a stale late response from a previous request arrived —
+              // discard it and keep the resolver waiting for the correct frame.
+              const isReadFunc = funcCode === 0x04 || funcCode === 0x03;
+              const receivedByteCount = completeFrame[2];
+              const expectedByteCount = lastExpectedResponseBytesRef.current;
+
+              if (isReadFunc && expectedByteCount !== null && receivedByteCount !== expectedByteCount) {
+                addLog('RX', `${hexString(completeFrame)} (${ascii}) | DISCARDED stale response (${receivedByteCount}B ≠ expected ${expectedByteCount}B)`);
+              } else {
+                // Dispatch to pending response handler
+                if (responseResolveQueueRef.current.length > 0) {
+                  const resolver = responseResolveQueueRef.current.shift();
+                  if (resolver) {
+                    resolver(completeFrame);
+                  }
+                }
+
+                // Process for context-based parsing
+                const parsedStr = processIncomingDataWithContext(completeFrame);
+                const logMsg = parsedStr
+                  ? `${hexString(completeFrame)} (${ascii}) | ${parsedStr}`
+                  : `${hexString(completeFrame)} (${ascii})`;
+                addLog('RX', logMsg);
+              }
             }
           }
         }
