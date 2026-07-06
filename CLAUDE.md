@@ -20,22 +20,36 @@ No test runner is configured. TypeScript strict mode (`"strict": true`, `"noUnus
 
 ```
 Browser UI → Web Serial API (native or polyfill) → Modbus RTU (CRC16) → Hardware
+                                                  → MDFU UART (firmware update)
 ```
 
-Modbus RTU encoding/decoding lives entirely in [utils/modbus.ts](utils/modbus.ts) (`buildReadInputRegisters`, `buildWriteMultipleRegisters`, `parseMbResponse`, `crc16`).
+- **Modbus RTU** encoding/decoding: [utils/modbus.ts](utils/modbus.ts) (`buildReadInputRegisters`, `buildWriteMultipleRegisters`, `parseMbResponse`, `crc16`)
+- **MDFU firmware update**: [utils/ntnUpdate.ts](utils/ntnUpdate.ts) orchestrates two phases; [utils/mdfu.ts](utils/mdfu.ts) holds pure MDFU protocol functions (ported from pymdfu); [utils/mdfuTransport.ts](utils/mdfuTransport.ts) handles UART framing (`encodeFrame`, `decodeFrame`)
+
+### Hardware model variants
+
+`DongleModel` (`'A1' | 'A2'`) and `LoraModuleType` (`'single-ch' | '8-ch'`) are selected in [components/DongleModelPanel.tsx](components/DongleModelPanel.tsx) and persisted to `localStorage`. Both are passed as parameters to `useDongleConnection(dongleModel, loraModule)`.
+
+- **A2 mode** has a different App.tsx layout: Serial Log moves to the right column and a LoRa Data panel appears showing `AT+BISULGET` payload (8-ch) or `AT+BISGET=?` payload (single-ch).
+- **8-ch** LoRa module uses `AT+BISULGET` instead of `AT+BISGET=?`. The `EightChDevice` type in [types.ts](types.ts) represents its device format.
 
 ### State management
 
 No global store. Two independent custom hooks own all hardware state:
 
-- **[hooks/useDongleConnection.ts](hooks/useDongleConnection.ts)** — NTN dongle: serial port lifecycle, read loop, Modbus request queue, device data polling (RSRP/SINR every 3 s), NTN config apply.
+- **[hooks/useDongleConnection.ts](hooks/useDongleConnection.ts)** — NTN dongle: serial port lifecycle, read loop, Modbus request queue, device data polling (RSRP/SINR every 3 s), NTN config apply. Takes `(dongleModel, loraModule)` params.
 - **[hooks/useLoRaConnection.ts](hooks/useLoRaConnection.ts)** — LoRa module: independent serial port, PCIE2 AT command wrapper, LoRa device list (up to 16 slots).
+- **[hooks/useFirmwareUpdate.ts](hooks/useFirmwareUpdate.ts)** — Firmware update: opens its own serial port via `WebSerialAdapter` (buffered pump loop to avoid lost bytes on timeout), calls `runUpdate()` from ntnUpdate.ts.
 
-Both hooks use refs (`portRef`, `readerRef`, `keepReadingRef`, `responseBufferRef`, `responseResolveQueueRef`) so serial state survives re-renders without stale closure issues.
+All hooks use refs (`portRef`, `readerRef`, `keepReadingRef`, `responseBufferRef`, `responseResolveQueueRef`) so serial state survives re-renders without stale closure issues.
 
 ### Request/response pattern (critical)
 
-Modbus is synchronous request/response over a shared byte stream. The read loop in `useDongleConnection` accumulates bytes in `responseBufferRef` until a complete frame arrives, then dispatches it to the **FIFO promise queue** (`responseResolveQueueRef`). Callers `await sendRequest(frame)` which pushes a resolver onto the queue and waits (2 s timeout). `lastCommandRef` tracks what was sent so `processIncomingDataWithContext()` knows how to parse the response.
+Modbus is synchronous request/response over a shared byte stream. The read loop in `useDongleConnection` accumulates bytes in `responseBufferRef` until a complete frame arrives, then dispatches it to the **FIFO promise queue** (`responseResolveQueueRef`). Callers `await sendRequest(frame)` which pushes a resolver onto the queue and waits (2 s timeout).
+
+`lastExpectedResponseBytesRef` tracks the expected byte count of the in-flight request so the read loop can discard stale responses that arrive with the wrong length (avoids mismatched frames from previous timed-out requests).
+
+`lastCommandRef` still exists and tracks the last sent command type; `pollCurrentConfig` now parses responses inline rather than relying on it, but other paths still use it.
 
 ### Tab switching behavior
 
@@ -52,11 +66,19 @@ Tab switching is coordinated via an **async `handleTabSwitch`** function in App.
 
 - `ConnectionState` enum: `DISCONNECTED | CONNECTING | CONNECTED | ERROR`
 - `DriverMode` enum: `AUTO | NATIVE | POLYFILL` (auto tries native first, falls back to WebUSB polyfill)
-- `DongleData`, `DongleStatus`, `NTNConfig`, `LoRaDevice`, `LoRaConfig`, `LogEntry`
+- `DongleData`, `DongleStatus`, `NTNConfig` — NTN dongle runtime data and config
+- `PCIE2CommandResult`, `DongleConnectionHandle` — PCIE2 AT command interface
+- `LoRaDevice` (includes `otaaAppKey` for OTAA mode), `LoRaConfig`, `EightChDevice` — LoRa types
+- `LoRaSetupProgress` — progress reporting during LoRa bulk setup
+- `MODBUS_CONSTANTS` — all register addresses as named constants
 
 ### Configuration persistence
 
-NTN config (APN, remote IP/port) is saved to `localStorage`. There is no backend.
+The following are saved to `localStorage` (no backend):
+- NTN config (APN, remote IP/port) — key `ntn-config`
+- Serial log, LoRa log, firmware log — capped at 500 entries each
+- `DongleModel` selection — key `ntn-dongle-model`
+- `LoraModuleType` selection — key `ntn-lora-module`
 
 ### Styling
 
