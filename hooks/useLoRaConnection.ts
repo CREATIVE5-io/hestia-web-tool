@@ -522,9 +522,9 @@ export const useLoRaConnection = () => {
         await sleep(500);
 
         // Send OTAA parameters if OTAA mode is enabled
-        // Format: AT+BISOTAA={idx}:{AppEUI 16chars}:{DevEUI 16chars}:{AppKey 32chars}
+        // Format: AT+BISOTAA={idx}:{DevEUI 16chars}:{AppEUI 16chars}:{AppKey 32chars}
         if (device.otaaMode && device.appEUI && device.devEUI && device.otaaAppKey) {
-          const otaaCmd = `AT+BISOTAA=${device.idx}:${device.appEUI}:${device.devEUI}:${device.otaaAppKey}`;
+          const otaaCmd = `AT+BISOTAA=${device.idx}:${device.devEUI}:${device.appEUI}:${device.otaaAppKey}`;
           const otaaResult = await sendPCIE2Command(otaaCmd);
           if (!otaaResult.success) throw new Error('Failed to set OTAA parameters');
           await sleep(500);
