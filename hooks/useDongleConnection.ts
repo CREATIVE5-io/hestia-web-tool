@@ -485,11 +485,11 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
     await sleep(200);
 
     lastCommandRef.current = 'CONFIG_ACTIVE_MODE';
-    let activeMode: 0 | 1 | undefined;
+    let activeMode: 0 | 1 | 2 | 3 | undefined;
     const modeResp = await sendModbusRequest(buildReadHoldingRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_ACTIVE_MODE, 1));
     if (modeResp) {
       const { registers, success } = parseHoldingRegistersResponse(modeResp);
-      if (success && (registers[0] === 0 || registers[0] === 1)) activeMode = registers[0] as 0 | 1;
+      if (success && registers[0] >= 0 && registers[0] <= 3) activeMode = registers[0] as 0 | 1 | 2 | 3;
     }
 
     setData(prev => ({ ...prev, currentConfig: cfg, activeMode: activeMode ?? prev.activeMode }));

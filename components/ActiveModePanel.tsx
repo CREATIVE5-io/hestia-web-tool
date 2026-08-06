@@ -2,14 +2,18 @@ import React, { useEffect, useState } from 'react';
 import { ExclamationTriangleIcon } from '@heroicons/react/24/outline';
 import { DashboardCard } from './DashboardCard';
 
+type ActiveMode = 0 | 1 | 2 | 3;
+const ALL_MODES: ActiveMode[] = [0, 1, 2, 3];
+const isSwitchable = (mode: ActiveMode): mode is 0 | 1 => mode === 0 || mode === 1;
+
 interface ActiveModePanelProps {
-  currentMode?: 0 | 1;
+  currentMode?: ActiveMode;
   isConnected: boolean;
   onApply: (mode: 0 | 1) => Promise<void>;
 }
 
 export const ActiveModePanel: React.FC<ActiveModePanelProps> = ({ currentMode, isConnected, onApply }) => {
-  const [selectedMode, setSelectedMode] = useState<0 | 1 | undefined>(currentMode);
+  const [selectedMode, setSelectedMode] = useState<ActiveMode | undefined>(currentMode);
   const [isApplying, setIsApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,7 +28,7 @@ export const ActiveModePanel: React.FC<ActiveModePanelProps> = ({ currentMode, i
   };
 
   const handleApply = async () => {
-    if (selectedMode === undefined) return;
+    if (selectedMode === undefined || !isSwitchable(selectedMode)) return;
     setError(null);
     setIsApplying(true);
     try {
@@ -37,38 +41,47 @@ export const ActiveModePanel: React.FC<ActiveModePanelProps> = ({ currentMode, i
     }
   };
 
-  const modeButtonClass = (mode: 0 | 1) => {
+  const modeButtonClass = (mode: ActiveMode) => {
     const isSelected = selectedMode === mode;
-    if (!isConnected) {
-      return 'flex-1 px-4 py-2 rounded-lg font-semibold text-sm transition-all bg-transparent text-slate-600 cursor-not-allowed';
+
+    if (!isSwitchable(mode)) {
+      return `flex-1 px-3 py-2 rounded-lg font-semibold text-sm cursor-not-allowed ${
+        isSelected ? 'bg-slate-700/60 text-slate-300 border border-slate-600' : 'bg-transparent text-slate-600'
+      }`;
     }
-    return `flex-1 px-4 py-2 rounded-lg font-semibold text-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-800 ${
+
+    if (!isConnected) {
+      return 'flex-1 px-3 py-2 rounded-lg font-semibold text-sm transition-all bg-transparent text-slate-600 cursor-not-allowed';
+    }
+
+    return `flex-1 px-3 py-2 rounded-lg font-semibold text-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-800 ${
       isSelected
         ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20'
         : 'bg-transparent text-slate-400 hover:text-slate-200'
     } ${isApplying ? 'opacity-60 cursor-wait' : ''}`;
   };
 
-  const isDirty = selectedMode !== undefined && selectedMode !== currentMode;
+  const isDirty = selectedMode !== undefined && isSwitchable(selectedMode) && selectedMode !== currentMode;
 
   return (
     <DashboardCard title="Active Mode" accent="blue">
       <div className="flex gap-2 bg-slate-900 p-1 rounded-lg border border-slate-700">
-        <button
-          onClick={() => handleSelect(0)}
-          disabled={!isConnected || isApplying}
-          className={modeButtonClass(0)}
-        >
-          MODE 0
-        </button>
-        <button
-          onClick={() => handleSelect(1)}
-          disabled={!isConnected || isApplying}
-          className={modeButtonClass(1)}
-        >
-          MODE 1
-        </button>
+        {ALL_MODES.map((mode) => (
+          <button
+            key={mode}
+            onClick={isSwitchable(mode) ? () => handleSelect(mode) : undefined}
+            disabled={!isSwitchable(mode) || !isConnected || isApplying}
+            title={!isSwitchable(mode) ? 'MODE 2/3 are shown for reference only and cannot be selected here' : undefined}
+            className={modeButtonClass(mode)}
+          >
+            MODE {mode}
+          </button>
+        ))}
       </div>
+
+      <p className="text-xs text-slate-500 mt-2 text-center">
+        Only MODE 0 and MODE 1 can be selected. MODE 2 and MODE 3 are shown for reference only.
+      </p>
 
       <button
         onClick={handleApply}

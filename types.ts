@@ -39,7 +39,7 @@ export interface DongleData {
   lastUpdated: number;
   configApplied?: boolean;
   currentConfig?: NTNConfig;
-  activeMode?: 0 | 1;
+  activeMode?: 0 | 1 | 2 | 3;
 }
 
 export interface NTNConfig {
