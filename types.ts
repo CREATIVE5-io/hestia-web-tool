@@ -39,6 +39,7 @@ export interface DongleData {
   lastUpdated: number;
   configApplied?: boolean;
   currentConfig?: NTNConfig;
+  activeMode?: 0 | 1;
 }
 
 export interface NTNConfig {
@@ -63,6 +64,7 @@ export interface DongleConnectionHandle {
   clearLogs: () => void;
   data: DongleData;
   applyNTNConfig: (config: NTNConfig) => Promise<boolean>;
+  applyActiveMode: (mode: 0 | 1) => Promise<void>;
   isReadLoopActive: boolean;
   startReadLoop: () => Promise<void>;
   startReadLoopOnly: () => Promise<void>;
@@ -95,6 +97,7 @@ export const MODBUS_CONSTANTS = {
   ADDR_APN: 0xC3BB,
   ADDR_REMOTE_IP: 0xC3CA,
   ADDR_LOCAL_PORT: 0xC3D5,
+  ADDR_ACTIVE_MODE: 0xC358,
 
   // PCIE2 CMD Addresses
   PCIE2_CMD_START: 0xC700,

@@ -484,8 +484,16 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
     }
     await sleep(200);
 
-    setData(prev => ({ ...prev, currentConfig: cfg }));
-    addLog('SYS', `Device config: APN=${cfg.apn}, IP=${cfg.remoteIp}, Port=${cfg.remotePort}, LocalPort=${cfg.localPort}`);
+    lastCommandRef.current = 'CONFIG_ACTIVE_MODE';
+    let activeMode: 0 | 1 | undefined;
+    const modeResp = await sendModbusRequest(buildReadHoldingRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_ACTIVE_MODE, 1));
+    if (modeResp) {
+      const { registers, success } = parseHoldingRegistersResponse(modeResp);
+      if (success && (registers[0] === 0 || registers[0] === 1)) activeMode = registers[0] as 0 | 1;
+    }
+
+    setData(prev => ({ ...prev, currentConfig: cfg, activeMode: activeMode ?? prev.activeMode }));
+    addLog('SYS', `Device config: APN=${cfg.apn}, IP=${cfg.remoteIp}, Port=${cfg.remotePort}, LocalPort=${cfg.localPort}, ActiveMode=${activeMode ?? '?'}`);
   };
 
   const pollStatus = async () => {
@@ -549,6 +557,37 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
       addLog('SYS', 'Configuration applied successfully!');
     } catch (error) {
       addLog('SYS', `Configuration failed: ${error}`, true);
+      throw error;
+    } finally {
+      // Resume polling
+      startPolling();
+    }
+  };
+
+  const applyActiveMode = async (mode: 0 | 1): Promise<void> => {
+    if (!keepReadingRef.current || !unlockVerifiedRef.current) {
+      throw new Error('Device not ready for configuration');
+    }
+
+    // Pause polling so the bus is quiet during the write
+    if (pollIntervalRef.current) {
+      window.clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+
+    addLog('SYS', `Setting Active Mode to ${mode}...`);
+
+    try {
+      const resp = await sendModbusRequest(
+        buildWriteMultipleRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_ACTIVE_MODE, [mode]),
+        3000
+      );
+      if (!resp) throw new Error('Write timeout for Active Mode');
+
+      setData(prev => ({ ...prev, activeMode: mode }));
+      addLog('SYS', `Active Mode set: ${mode}`);
+    } catch (error) {
+      addLog('SYS', `Active Mode update failed: ${error}`, true);
       throw error;
     } finally {
       // Resume polling
@@ -991,6 +1030,7 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
     clearLogs,
     data,
     applyNTNConfig,
+    applyActiveMode,
     isReadLoopActive,
     startReadLoop,
     startReadLoopOnly,

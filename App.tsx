@@ -5,6 +5,7 @@ import { DashboardCard } from './components/DashboardCard';
 import { StatusBadge } from './components/StatusBadge';
 import { LogViewer } from './components/LogViewer';
 import { ConfigPanel } from './components/ConfigPanel';
+import { ActiveModePanel } from './components/ActiveModePanel';
 import { LoRaConfig } from './components/LoRaConfig';
 import { FirmwareUpdate } from './components/FirmwareUpdate';
 import { DongleModelPanel, loadSavedModel, loadSavedLoraModule } from './components/DongleModelPanel';
@@ -26,7 +27,7 @@ const App: React.FC = () => {
   const [dongleModel, setDongleModel] = useState<DongleModel>(loadSavedModel);
   const [loraModule, setLoraModule] = useState<LoraModuleType>(loadSavedLoraModule);
   const dongleConn = useDongleConnection(dongleModel, loraModule);
-  const { connectionState, connect, disconnect, logs, clearLogs, data, applyNTNConfig, isReadLoopActive, startReadLoop, stopReadLoop } = dongleConn;
+  const { connectionState, connect, disconnect, logs, clearLogs, data, applyNTNConfig, applyActiveMode, isReadLoopActive, startReadLoop, stopReadLoop } = dongleConn;
   const [driverMode, setDriverMode] = useState<DriverMode>(DriverMode.AUTO);
   const [activeTab, setActiveTab] = useState<Tab>('ntn');
   const loraDisconnectRef = useRef<(() => Promise<void>) | null>(null);
@@ -257,6 +258,10 @@ const App: React.FC = () => {
 
             {/* Column 3-4: Signal Metrics */}
             <div className="xl:col-span-2 lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6 h-fit">
+              <div className="md:col-span-2">
+                <ActiveModePanel currentMode={data.activeMode} isConnected={isConnected} onApply={applyActiveMode} />
+              </div>
+
               <DashboardCard title="Signal Strength (RSRP)" className="h-full" accent={data.rsrp !== '--' && parseInt(data.rsrp) > -100 ? 'green' : 'blue'}>
                  <div className="flex flex-col items-center justify-center py-4">
                    <SignalIcon className={`w-10 h-10 mb-2 ${
