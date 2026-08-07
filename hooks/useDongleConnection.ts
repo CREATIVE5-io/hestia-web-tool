@@ -428,6 +428,26 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
     startPolling();
   };
 
+  // Polls the STATUS register until bit 0 (Module AT Ready) is set. The module's
+  // RF is turned ON ~500ms after AT ready, and IMSI can't be read until RF is ON,
+  // so callers must wait for this before requesting IMSI.
+  const waitForModuleAtReady = async (maxAttempts = 20, intervalMs = 300): Promise<boolean> => {
+    for (let i = 0; i < maxAttempts; i++) {
+      if (!keepReadingRef.current) return false;
+
+      lastCommandRef.current = 'STATUS';
+      const resp = await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_STATUS, 1));
+      if (resp) {
+        const { registers, success } = parseReadInputRegistersResponse(resp);
+        if (success && (registers[0] & 0x01) > 0) {
+          return true;
+        }
+      }
+      await sleep(intervalMs);
+    }
+    return false;
+  };
+
   const pollStaticInfo = async () => {
     if (!keepReadingRef.current) return;
 
@@ -439,8 +459,29 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
     await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_FW_VER, 2));
     await sleep(200);
 
+    addLog('SYS', 'Waiting for Module AT Ready before reading IMSI...');
+    const atReady = await waitForModuleAtReady();
+    if (atReady) {
+      // RF ON is issued 500ms after Module AT Ready; IMSI is unreadable until then.
+      await sleep(500);
+    } else {
+      addLog('SYS', 'Timed out waiting for Module AT Ready; attempting IMSI read anyway.', true);
+    }
+
     lastCommandRef.current = 'IMSI';
-    await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_IMSI, 8));
+    let imsiResp = await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_IMSI, 8));
+    let imsiVal = imsiResp ? parseModbusString(parseReadInputRegistersResponse(imsiResp).registers) : '';
+
+    // IMSI response is easily lost to the request/response desync seen right after
+    // unlock (real replies routinely arrive a step late and get discarded as stale) —
+    // retry once after a short wait.
+    if (!imsiVal) {
+      addLog('SYS', 'IMSI empty, retrying once...', true);
+      await sleep(500);
+      lastCommandRef.current = 'IMSI';
+      imsiResp = await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_IMSI, 8));
+      imsiVal = imsiResp ? parseModbusString(parseReadInputRegistersResponse(imsiResp).registers) : '';
+    }
     await sleep(200);
 
     await pollCurrentConfig();
