@@ -451,10 +451,17 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
     startPolling();
   };
 
-  // Polls the STATUS register until bit 0 (Module AT Ready) is set. The module's
-  // RF is turned ON ~500ms after AT ready, and IMSI can't be read until RF is ON,
-  // so callers must wait for this before requesting IMSI.
-  const waitForModuleAtReady = async (maxAttempts = 20, intervalMs = 300): Promise<boolean> => {
+  // Polls the STATUS register until bit 0 (Module AT Ready) AND bit 2 (SIM Ready)
+  // are both set. IMSI can't be read reliably until the SIM has been detected —
+  // AT-ready alone isn't enough, the module needs a bit longer to attach the SIM.
+  // On a fresh power-on, AT-ready and SIM-ready have been observed to land as
+  // late as ~17-20s in; maxAttempts=80 * intervalMs=500ms gives a 40s budget
+  // with real margin above that.
+  const waitForAtAndSimReady = async (maxAttempts = 80, intervalMs = 500): Promise<boolean> => {
+    const AT_READY_BIT = 0x01;
+    const SIM_READY_BIT = 0x04;
+    const requiredBits = AT_READY_BIT | SIM_READY_BIT;
+
     for (let i = 0; i < maxAttempts; i++) {
       if (!keepReadingRef.current) return false;
 
@@ -462,7 +469,7 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
       const resp = await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_STATUS, 1));
       if (resp) {
         const { registers, success } = parseReadInputRegistersResponse(resp);
-        if (success && (registers[0] & 0x01) > 0) {
+        if (success && (registers[0] & requiredBits) === requiredBits) {
           return true;
         }
       }
@@ -482,13 +489,13 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
     await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_FW_VER, 2));
     await sleep(200);
 
-    addLog('SYS', 'Waiting for Module AT Ready before reading IMSI...');
-    const atReady = await waitForModuleAtReady();
-    if (atReady) {
+    addLog('SYS', 'Waiting for Module AT Ready + SIM Ready before reading IMSI...');
+    const deviceReady = await waitForAtAndSimReady();
+    if (deviceReady) {
       // RF ON is issued 500ms after Module AT Ready; IMSI is unreadable until then.
       await sleep(500);
     } else {
-      addLog('SYS', 'Timed out waiting for Module AT Ready; attempting IMSI read anyway.', true);
+      addLog('SYS', 'Timed out waiting for AT Ready + SIM Ready; attempting IMSI read anyway.', true);
     }
 
     lastCommandRef.current = 'IMSI';
