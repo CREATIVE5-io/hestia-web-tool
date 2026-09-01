@@ -392,37 +392,60 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
 
   const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-  const initDongle = async () => {
-    let attempts = 0;
-    const maxAttempts = 3;
-    unlockVerifiedRef.current = false;
+  const INIT_RETRY_ATTEMPTS = 3;
+  const INIT_RETRY_SLEEP_MS = 2000;
 
-    while (attempts < maxAttempts && !unlockVerifiedRef.current) {
-      attempts++;
-      addLog('SYS', `Initializing Dongle (Password Attempt ${attempts}/${maxAttempts})...`);
-      
-      const passwordPayload = [0, 0, 0, 0]; 
-      const frame = buildWriteMultipleRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_PASSWORD, passwordPayload);
-      await sendModbusRequest(frame);
-      
-      await sleep(300);
+  // Sets the device password, retrying on write timeout/failure.
+  const setPasswordWithRetry = async (): Promise<boolean> => {
+    const passwordPayload = [0, 0, 0, 0];
+    const frame = buildWriteMultipleRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_PASSWORD, passwordPayload);
 
+    for (let attempt = 1; attempt <= INIT_RETRY_ATTEMPTS; attempt++) {
+      addLog('SYS', `Setting device password (Attempt ${attempt}/${INIT_RETRY_ATTEMPTS})...`);
+      const resp = await sendModbusRequest(frame);
+      if (resp) return true;
+
+      addLog('SYS', `Set password failed (Attempt ${attempt}/${INIT_RETRY_ATTEMPTS})`, true);
+      if (attempt < INIT_RETRY_ATTEMPTS) await sleep(INIT_RETRY_SLEEP_MS);
+    }
+    return false;
+  };
+
+  // Reads the MODEL register to verify the unlock, retrying on failure.
+  // unlockVerifiedRef is set as a side effect of processIncomingDataWithContext
+  // handling the 'VERIFY_INIT'-tagged response in the read loop.
+  const getModelWithRetry = async (): Promise<boolean> => {
+    for (let attempt = 1; attempt <= INIT_RETRY_ATTEMPTS; attempt++) {
+      addLog('SYS', `Reading device model (Attempt ${attempt}/${INIT_RETRY_ATTEMPTS})...`);
       lastCommandRef.current = 'VERIFY_INIT';
       await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_MODEL_NAME, 5));
-      
-      await sleep(500);
 
-      if (unlockVerifiedRef.current) {
-        addLog('SYS', 'Dongle Unlocked Successfully.');
-        break;
-      } else {
-        addLog('SYS', 'Unlock verification failed, retrying...', true);
-      }
+      if (unlockVerifiedRef.current) return true;
+
+      addLog('SYS', `Get MODEL failed (Attempt ${attempt}/${INIT_RETRY_ATTEMPTS})`, true);
+      if (attempt < INIT_RETRY_ATTEMPTS) await sleep(INIT_RETRY_SLEEP_MS);
+    }
+    return false;
+  };
+
+  const initDongle = async () => {
+    unlockVerifiedRef.current = false;
+
+    const passwordOk = await setPasswordWithRetry();
+    if (!passwordOk) {
+      addLog('SYS', 'CRITICAL: Failed to set device password after multiple attempts. Device may not be ready.', true);
+      throw new Error('Failed to set device password');
     }
 
-    if (!unlockVerifiedRef.current) {
-       addLog('SYS', 'CRITICAL: Failed to unlock dongle after multiple attempts.', true);
+    await sleep(300);
+
+    const modelOk = await getModelWithRetry();
+    if (!modelOk) {
+      addLog('SYS', 'CRITICAL: Failed to read device model after multiple attempts. Device may not be ready.', true);
+      throw new Error('Failed to read device model');
     }
+
+    addLog('SYS', 'Dongle Unlocked Successfully.');
 
     await pollStaticInfo();
     startPolling();
@@ -893,7 +916,16 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
 
     if (readerRef.current) {
       addLog('SYS', 'Read loop is now listening, initializing device...');
-      if (keepReadingRef.current) await initDongle();
+      if (keepReadingRef.current) {
+        try {
+          await initDongle();
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          addLog('SYS', `Device initialization aborted: ${msg}`, true);
+          setConnectionState(ConnectionState.ERROR);
+          await stopReadLoop();
+        }
+      }
     } else {
       addLog('SYS', 'Warning: Read loop started but reader not ready', true);
     }
