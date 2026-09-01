@@ -50,6 +50,7 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
   const dongleModelRef = useRef<DongleModel>(dongleModel);
   const loraModuleRef = useRef<LoraModuleType>(loraModule);
   const lastExpectedResponseBytesRef = useRef<number | null>(null);
+  const isPollStatusInFlightRef = useRef<boolean>(false);
 
   // Response queue for request/response matching - supports multiple pending requests
   const responseResolveQueueRef = useRef<Array<(data: Uint8Array) => void>>([]);
@@ -570,20 +571,34 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
   const pollStatus = async () => {
     if (!keepReadingRef.current) return;
 
-    lastCommandRef.current = 'STATUS';
-    await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_STATUS, 1));
-    await sleep(150);
+    // Guard against overlapping cycles: if a previous pollStatus() is still
+    // waiting on a response (e.g. a slow/timed-out request), skip this tick
+    // rather than firing a second concurrent request stream over the shared
+    // serial port and desyncing lastCommandRef / the response queue.
+    if (isPollStatusInFlightRef.current) {
+      addLog('SYS', 'Skipping poll tick: previous poll still in progress', true);
+      return;
+    }
+    isPollStatusInFlightRef.current = true;
 
-    lastCommandRef.current = 'SINR';
-    await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_SINR, 2));
-    await sleep(150);
+    try {
+      lastCommandRef.current = 'STATUS';
+      await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_STATUS, 1));
+      await sleep(150);
 
-    lastCommandRef.current = 'RSRP';
-    await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_RSRP, 2));
+      lastCommandRef.current = 'SINR';
+      await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_SINR, 2));
+      await sleep(150);
 
-    if (dongleModelRef.current === 'A2') {
-      await sleep(200);
-      await pollLoraData();
+      lastCommandRef.current = 'RSRP';
+      await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_RSRP, 2));
+
+      if (dongleModelRef.current === 'A2') {
+        await sleep(200);
+        await pollLoraData();
+      }
+    } finally {
+      isPollStatusInFlightRef.current = false;
     }
   };
 
