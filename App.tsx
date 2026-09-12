@@ -8,6 +8,7 @@ import { ConfigPanel } from './components/ConfigPanel';
 import { ActiveModePanel } from './components/ActiveModePanel';
 import { LoRaConfig } from './components/LoRaConfig';
 import { FirmwareUpdate } from './components/FirmwareUpdate';
+import { NtnDongleAT } from './components/NtnDongleAT';
 import { DongleModelPanel, loadSavedModel, loadSavedLoraModule } from './components/DongleModelPanel';
 import type { DongleModel, LoraModuleType } from './components/DongleModelPanel';
 import {
@@ -21,7 +22,7 @@ import {
   RssIcon,
 } from '@heroicons/react/24/outline';
 
-type Tab = 'ntn' | 'lora' | 'firmware';
+type Tab = 'ntn' | 'ntn-at' | 'lora' | 'firmware';
 
 const App: React.FC = () => {
   const [dongleModel, setDongleModel] = useState<DongleModel>(loadSavedModel);
@@ -32,6 +33,7 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('ntn');
   const loraDisconnectRef = useRef<(() => Promise<void>) | null>(null);
   const fwDisconnectRef   = useRef<(() => Promise<void>) | null>(null);
+  const ntnAtDisconnectRef = useRef<(() => Promise<void>) | null>(null);
   const [isFwUpdating, setIsFwUpdating] = useState(false);
 
   const isConnected = connectionState === ConnectionState.CONNECTED;
@@ -43,6 +45,9 @@ const App: React.FC = () => {
     if (activeTab === 'ntn') {
       // Stop NTN read loop and disconnect serial port before switching
       await disconnect();
+    } else if (activeTab === 'ntn-at' && ntnAtDisconnectRef.current) {
+      // Stop AT session and disconnect serial port before switching
+      await ntnAtDisconnectRef.current();
     } else if (activeTab === 'lora' && loraDisconnectRef.current) {
       // Stop LoRa loop and disconnect serial port before switching
       await loraDisconnectRef.current();
@@ -86,6 +91,19 @@ const App: React.FC = () => {
             }`}
           >
             NTN Dongle
+          </button>
+          <button
+            onClick={() => handleTabSwitch('ntn-at')}
+            disabled={isFwUpdating && activeTab !== 'ntn-at'}
+            className={`flex-1 px-6 py-3 rounded-lg font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-800 ${
+              activeTab === 'ntn-at'
+                ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20'
+                : isFwUpdating
+                  ? 'bg-transparent text-slate-600 cursor-not-allowed'
+                  : 'bg-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            NTN Dongle - AT
           </button>
           <button
             onClick={() => handleTabSwitch('lora')}
@@ -315,6 +333,11 @@ const App: React.FC = () => {
           </div>
         )}
 
+        {/* NTN Dongle AT Tab Content */}
+        {activeTab === 'ntn-at' && (
+          <NtnDongleAT onRegisterDisconnect={(fn) => { ntnAtDisconnectRef.current = fn; }} />
+        )}
+
         {/* LoRa Configuration Tab Content */}
         {activeTab === 'lora' && (
           <LoRaConfig onRegisterDisconnect={(fn) => { loraDisconnectRef.current = fn; }} />
@@ -343,6 +366,8 @@ const App: React.FC = () => {
              <span>Serial connected - Click Connect to start communication</span>
            ) : activeTab === 'ntn' ? (
              <span>Waiting for serial connection...</span>
+           ) : activeTab === 'ntn-at' ? (
+             <span>NTN Dongle AT Mode — Modbus RTU switches the dongle into UART passthrough for direct AT commands</span>
            ) : activeTab === 'lora' ? (
              <span>LoRa Configuration Interface - Configure your LoRa dongle and devices</span>
            ) : (

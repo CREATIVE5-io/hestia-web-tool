@@ -1,0 +1,64 @@
+NTN_RMM-T1 AT Command User Manual (S070000047295, Rev.AD)
+Pseudo code derived from page 54 (7.9) and page 55 (7.10)
+================================================================
+
+Note:
+  - below Pseudo code should put after send password and swtich to passthrough mode
+
+7.9 IP Network Attach Procedure (page 54)
+----------------------------------------------------------------
+#wait for Power_On event
+loop:
+    send  ATI          
+    wait  OK           // Module AT Ready
+
+// AT commands can now be sent to the module
+send  AT!CNWATT=0                   // attach to network using AT!CPDNDT settings
+wait  OK                            // this also implicitly turns Module RF OFF
+
+send  AT!CPDNDT="IP","vpnus.mono"      // store PDN connection settings in NVRAM, default is 'vpnus.mono'
+wait  OK
+
+send  AT!CNWATT=1                   // attach to network using AT!CPDNDT settings
+wait  OK                            // this also implicitly turns Module RF ON
+
+wait for URC "+CPIN: READY"         // SIM Ready
+
+loop:
+    send  AT!CNWSTA?                // check registration status
+    wait  response "!CNWSTA: 0,5"   // <state>,<roaming/RAT info>
+    wait  OK
+
+    if state == 0:                  // not registered, not searching
+        // handle / retry
+    else if state == 2:             // not registered, searching
+        // wait / retry
+    else if state == 5:             // registered, roaming
+        break                       // registration succeeded
+                                    // Network Registered
+
+wait for URC "+IP: xxx.xxx.xxx.xxx"    // module reports assigned IP address
+                                       // IP Ready
+
+// module is now attached and has an IP; ready for data traffic
+
+Note: if UE initiates access on a non-HPLMN network, roaming will be
+enabled (hence state 5 above).
+
+
+7.10 Generate IP Data Traffic over UDP (page 55)
+----------------------------------------------------------------
+// precondition: module already attached to network with IP (see 7.9)
+
+send  AT+ESOC=1,2,1                       // create UDP socket
+wait  response "+ESOC=1"                  // socket ID = 1
+wait  OK
+
+send  AT+ESOCON=1,7000,"172.31.79.129"   // connect socket 1 to remote server:port
+wait  OK                                 // Socket Ready
+                                         // NTN Ready if all status are Ready
+
+Notes on UDP-based application design (page 55):
+  - Applications must tolerate UDP errors, loss, and duplication.
+  - Consider whether/how data packets are charged (is the IP/UDP header counted?).
+  - If the application needs downlink data, consider how to reach the UE behind NAT.

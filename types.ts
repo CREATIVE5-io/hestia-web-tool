@@ -98,6 +98,8 @@ export const MODBUS_CONSTANTS = {
   ADDR_REMOTE_IP: 0xC3CA,
   ADDR_LOCAL_PORT: 0xC3D5,
   ADDR_ACTIVE_MODE: 0xC358,
+  // UART passthrough switch: write 0x03 (MODE 3) to drop the dongle into direct AT command mode.
+  ADDR_UART_MODE: 0xC350,
 
   // PCIE2 CMD Addresses
   PCIE2_CMD_START: 0xC700,

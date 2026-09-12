@@ -4,9 +4,10 @@ import { LogEntry } from '../types';
 interface LogViewerProps {
   logs: LogEntry[];
   onClear?: () => void;
+  title?: string;
 }
 
-export const LogViewer: React.FC<LogViewerProps> = ({ logs, onClear }) => {
+export const LogViewer: React.FC<LogViewerProps> = ({ logs, onClear, title = 'SERIAL LOG' }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
 
@@ -26,7 +27,7 @@ export const LogViewer: React.FC<LogViewerProps> = ({ logs, onClear }) => {
   return (
     <div className="flex flex-col h-full bg-slate-950 rounded-lg border border-slate-800 font-mono text-xs overflow-hidden">
       <div className="bg-slate-900 px-4 py-2 border-b border-slate-800 font-semibold flex justify-between items-center">
-        <span className="text-blue-400">SERIAL LOG</span>
+        <span className="text-blue-400">{title}</span>
         <div className="flex items-center gap-4">
           <span className={`text-[10px] uppercase tracking-wider ${autoScroll ? 'text-blue-400/50' : 'text-slate-600'}`}>
             Autoscroll {autoScroll ? 'ON' : 'OFF'}
