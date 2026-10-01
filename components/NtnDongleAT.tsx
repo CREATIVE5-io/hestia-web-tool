@@ -19,15 +19,31 @@ export const NtnDongleAT: React.FC<NtnDongleATProps> = ({ onRegisterDisconnect }
     isReadLoopActive,
     isBootstrapping,
     isSending,
+    inFlightCommand,
+    cancelledCommand,
+    showRawRx,
+    setShowRawRx,
     isWaitingAtReady,
     startReadLoop,
     stopReadLoop,
-    sendCommand
+    sendCommand,
+    cancelCommand
   } = useDongleConnectionAT();
 
   const [driverMode, setDriverMode] = useState<DriverMode>(DriverMode.AUTO);
   const [commandInput, setCommandInput] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const [elapsedSec, setElapsedSec] = useState(0);
+
+  // Tick an elapsed-seconds counter while a command is awaiting its response.
+  useEffect(() => {
+    if (!inFlightCommand) return;
+    setElapsedSec(0);
+    const id = setInterval(() => {
+      setElapsedSec(Math.floor((Date.now() - inFlightCommand.startedAt) / 1000));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [inFlightCommand]);
 
   const isConnected = connectionState === ConnectionState.CONNECTED;
   const isError = connectionState === ConnectionState.ERROR;
@@ -179,6 +195,41 @@ export const NtnDongleAT: React.FC<NtnDongleATProps> = ({ onRegisterDisconnect }
               >
                 {isSending ? 'Sending...' : 'Send'}
               </button>
+              {inFlightCommand && (
+                <div className="bg-slate-900 border border-blue-800/50 rounded-lg p-3 text-xs text-slate-300 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="w-3 h-3 rounded-full border-2 border-blue-400 border-t-transparent animate-spin shrink-0" />
+                    <span className="font-mono truncate">{inFlightCommand.command}</span>
+                  </div>
+                  <div className="text-slate-400">
+                    Waiting for response... {elapsedSec}s / {Math.round(inFlightCommand.timeoutMs / 1000)}s
+                  </div>
+                  <button
+                    onClick={cancelCommand}
+                    className="w-full px-3 py-1.5 rounded-lg font-semibold bg-orange-500/10 text-orange-400 border border-orange-500/50 hover:bg-orange-500/20 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <p className="text-slate-500">
+                    Cancel only stops waiting here - the module keeps running the command.
+                  </p>
+                </div>
+              )}
+              {!inFlightCommand && cancelledCommand && (
+                <div className="bg-orange-900/20 border border-orange-800/50 rounded-lg p-3 text-xs text-orange-300">
+                  <strong className="font-mono">{cancelledCommand}</strong> may still be running on the module.
+                  New commands may be ignored until its late reply (OK/ERROR) appears in the log.
+                </div>
+              )}
+              <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={showRawRx}
+                  onChange={(e) => setShowRawRx(e.target.checked)}
+                  className="rounded border-slate-600 bg-slate-800"
+                />
+                Log raw RX bytes (debug)
+              </label>
               <p className="text-xs text-slate-500">
                 {isWaitingAtReady
                   ? 'Waiting for Module AT Ready (auto ATI polling)...'

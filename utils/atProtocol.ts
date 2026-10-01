@@ -4,6 +4,18 @@ export function encodeATCommand(command: string): Uint8Array {
   return new TextEncoder().encode(command + '\r\n');
 }
 
+/** Render raw bytes for debugging: printable ASCII as-is, CR/LF as \r/\n, anything else as <hh>. */
+export function formatRawBytes(bytes: Uint8Array): string {
+  let out = '';
+  for (const b of bytes) {
+    if (b === 0x0d) out += '\\r';
+    else if (b === 0x0a) out += '\\n';
+    else if (b >= 0x20 && b < 0x7f) out += String.fromCharCode(b);
+    else out += `<${b.toString(16).padStart(2, '0')}>`;
+  }
+  return out;
+}
+
 /** Split a raw decoded text buffer into complete lines and the unterminated remainder. */
 export function splitLines(buffer: string): { lines: string[]; remainder: string } {
   const parts = buffer.split(/\r\n|\r|\n/);
@@ -84,4 +96,37 @@ export async function readRawWithTimeout(reader: ReadableStreamDefaultReader<Uin
   let offset = 0;
   for (const c of chunks) { out.set(c, offset); offset += c.length; }
   return out;
+}
+
+/**
+ * Per-command response timeout. Most AT commands answer in well under a second,
+ * but network scans / attach operations block until the radio finishes - e.g.
+ * AT+COPS=? (operator scan) typically takes 30 s to 3 min. 3GPP TS 27.007 gives
+ * no upper bound, so the long-running entries use a generous ceiling and the UI
+ * shows a live "waiting" indicator with a Cancel button instead of a timeout.
+ */
+export const DEFAULT_AT_TIMEOUT_MS = 5000;
+
+const LONG_RUNNING_AT_COMMANDS: { pattern: RegExp; timeoutMs: number }[] = [
+  { pattern: /^AT\+COPS=\?$/i, timeoutMs: 240_000 },   // operator scan
+  { pattern: /^AT\+COPS=/i, timeoutMs: 180_000 },      // manual/auto operator select
+  { pattern: /^AT\+CGATT=/i, timeoutMs: 180_000 },     // PS attach/detach
+  { pattern: /^AT\+CGACT=/i, timeoutMs: 150_000 },     // PDP context activate
+  { pattern: /^AT\+CFUN=/i, timeoutMs: 60_000 },       // radio on/off, reboot
+];
+
+export function getATCommandTimeoutMs(command: string): number {
+  const trimmed = command.trim();
+  return LONG_RUNNING_AT_COMMANDS.find(c => c.pattern.test(trimmed))?.timeoutMs ?? DEFAULT_AT_TIMEOUT_MS;
+}
+
+/**
+ * The tag the command's own result line starts with, e.g. "AT+CEREG?" -> "+CEREG:",
+ * "AT!CNWSTA?" -> "!CNWSTA:", "AT%XSYSTEMMODE?" -> "%XSYSTEMMODE:". Null for
+ * untagged commands like ATI. Used to finish responses from modules (the Nordic
+ * RMM-T1 build) that send the result line but no trailing OK.
+ */
+export function getATResultTag(command: string): string | null {
+  const m = /^AT([+!*%#$][A-Z0-9_]+)/i.exec(command.trim());
+  return m ? `${m[1].toUpperCase()}:` : null;
 }

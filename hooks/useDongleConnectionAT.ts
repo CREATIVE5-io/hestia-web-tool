@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { ConnectionState, LogEntry, SerialPort, DriverMode, MODBUS_CONSTANTS } from '../types';
 import { buildWriteMultipleRegisters, buildWriteSingleRegister, hexString } from '../utils/modbus';
-import { encodeATCommand, splitLines, detectTerminator, readRawWithTimeout } from '../utils/atProtocol';
+import { encodeATCommand, splitLines, detectTerminator, readRawWithTimeout, formatRawBytes, getATCommandTimeoutMs, getATResultTag, DEFAULT_AT_TIMEOUT_MS } from '../utils/atProtocol';
 // @ts-ignore - The polyfill types aren't always perfect, ignore for build safety
 import { serial as polyfillSerial } from 'web-serial-polyfill';
 
@@ -21,6 +21,25 @@ interface PendingCommand {
   lines: string[];
   resolve: (result: { lines: string[]; ok: boolean } | null) => void;
   timeoutId: ReturnType<typeof setTimeout>;
+  // Tag of the command's own result line (see getATResultTag). Once a line with it
+  // arrives, the command also completes after RESULT_IDLE_MS of silence, for
+  // modules that never send the trailing OK.
+  resultTag: string | null;
+  idleTimerId: ReturnType<typeof setTimeout> | null;
+}
+
+const RESULT_IDLE_MS = 500;
+
+const clearPendingTimers = (pending: PendingCommand) => {
+  clearTimeout(pending.timeoutId);
+  if (pending.idleTimerId) clearTimeout(pending.idleTimerId);
+};
+
+/** The manually-sent command currently awaiting OK/ERROR, for the UI's elapsed-time indicator. */
+export interface InFlightATCommand {
+  command: string;
+  startedAt: number;
+  timeoutMs: number;
 }
 
 /** Outcome of the Modbus->UART-passthrough bootstrap run before the AT session starts. */
@@ -35,6 +54,10 @@ export const useDongleConnectionAT = () => {
   const [isReadLoopActive, setIsReadLoopActive] = useState(false);
   const [isBootstrapping, setIsBootstrapping] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [inFlightCommand, setInFlightCommand] = useState<InFlightATCommand | null>(null);
+  // Set after Cancel: the module is likely still executing the abandoned command
+  // and may ignore new ones. Cleared when its late OK/ERROR arrives.
+  const [cancelledCommand, setCancelledCommand] = useState<string | null>(null);
   const [isWaitingAtReady, setIsWaitingAtReady] = useState(false);
   const isWaitingAtReadyRef = useRef<boolean>(false);
 
@@ -46,6 +69,14 @@ export const useDongleConnectionAT = () => {
 
   const lineRemainderRef = useRef<string>('');
   const pendingCommandRef = useRef<PendingCommand | null>(null);
+  const inFlightCommandRef = useRef<InFlightATCommand | null>(null);
+  // Set when a command completed on idle after its result line; a trailing
+  // OK/ERROR that arrives late then belongs to it rather than being a URC.
+  const expectTrailingTerminatorRef = useRef<boolean>(false);
+  // Debug: log every received chunk byte-for-byte before line splitting.
+  const [showRawRx, setShowRawRx] = useState(false);
+  const showRawRxRef = useRef<boolean>(false);
+  showRawRxRef.current = showRawRx;
 
   const addLog = useCallback((direction: 'TX' | 'RX' | 'SYS', message: string, isError = false) => {
     setLogs(prev => {
@@ -77,7 +108,7 @@ export const useDongleConnectionAT = () => {
     keepReadingRef.current = false;
 
     if (pendingCommandRef.current) {
-      clearTimeout(pendingCommandRef.current.timeoutId);
+      clearPendingTimers(pendingCommandRef.current);
       pendingCommandRef.current.resolve(null);
       pendingCommandRef.current = null;
     }
@@ -251,12 +282,15 @@ export const useDongleConnectionAT = () => {
       addLog('SYS', 'Warning: AT session not active, response may not be captured', true);
     }
 
+    expectTrailingTerminatorRef.current = false;
     await writeATCommand(command);
 
     return new Promise((resolve) => {
       const pending: PendingCommand = {
         lines: [],
         resolve,
+        resultTag: getATResultTag(command),
+        idleTimerId: null,
         timeoutId: setTimeout(() => {
           if (pendingCommandRef.current === pending) {
             pendingCommandRef.current = null;
@@ -309,6 +343,7 @@ export const useDongleConnectionAT = () => {
         const { value, done } = await readerRef.current.read();
         if (done) break;
         if (!value || value.length === 0) continue;
+        if (showRawRxRef.current) addLog('RX', `[RAW ${value.length}B] ${formatRawBytes(value)}`);
 
         const text = lineRemainderRef.current + decoder.decode(value, { stream: true });
         const { lines, remainder } = splitLines(text);
@@ -321,13 +356,28 @@ export const useDongleConnectionAT = () => {
             addLog('RX', line);
             if (terminator.terminated) {
               pendingCommandRef.current = null;
-              clearTimeout(pending.timeoutId);
+              clearPendingTimers(pending);
               pending.resolve({ lines: pending.lines, ok: terminator.ok });
             } else {
               pending.lines.push(line);
+              // Result line seen (or more lines after it): (re)arm the idle completion.
+              if (pending.idleTimerId || (pending.resultTag && line.toUpperCase().startsWith(pending.resultTag))) {
+                if (pending.idleTimerId) clearTimeout(pending.idleTimerId);
+                pending.idleTimerId = setTimeout(() => {
+                  if (pendingCommandRef.current !== pending) return;
+                  pendingCommandRef.current = null;
+                  clearPendingTimers(pending);
+                  expectTrailingTerminatorRef.current = true;
+                  pending.resolve({ lines: pending.lines, ok: true });
+                }, RESULT_IDLE_MS);
+              }
             }
+          } else if (expectTrailingTerminatorRef.current && detectTerminator(line).terminated) {
+            expectTrailingTerminatorRef.current = false;
+            addLog('RX', line);
           } else {
             addLog('RX', `${line} (URC)`);
+            if (detectTerminator(line).terminated) setCancelledCommand(null);
           }
         }
       }
@@ -411,9 +461,10 @@ export const useDongleConnectionAT = () => {
     keepReadingRef.current = false;
     setIsReadLoopActive(false);
     addLog('SYS', 'Stopping AT session...');
+    setCancelledCommand(null);
 
     if (pendingCommandRef.current) {
-      clearTimeout(pendingCommandRef.current.timeoutId);
+      clearPendingTimers(pendingCommandRef.current);
       pendingCommandRef.current.resolve(null);
       pendingCommandRef.current = null;
     }
@@ -544,12 +595,34 @@ export const useDongleConnectionAT = () => {
       addLog('SYS', 'Still waiting for Module AT Ready - please wait for the automatic ATI check to finish.', true);
       return;
     }
+    const timeoutMs = getATCommandTimeoutMs(trimmed);
+    if (timeoutMs > DEFAULT_AT_TIMEOUT_MS) {
+      addLog('SYS', `${trimmed} can take a while - waiting up to ${Math.round(timeoutMs / 1000)}s for a response...`);
+    }
     setIsSending(true);
+    setCancelledCommand(null);
+    const inFlight = { command: trimmed, startedAt: Date.now(), timeoutMs };
+    inFlightCommandRef.current = inFlight;
+    setInFlightCommand(inFlight);
     try {
-      await sendATCommand(trimmed, 5000);
+      await sendATCommand(trimmed, timeoutMs);
     } finally {
       setIsSending(false);
+      inFlightCommandRef.current = null;
+      setInFlightCommand(null);
     }
+  }, [addLog]);
+
+  // Stops waiting for the in-flight command. The module itself may still be
+  // busy (e.g. mid operator scan); its late reply will show up in the log as a URC.
+  const cancelCommand = useCallback(() => {
+    const pending = pendingCommandRef.current;
+    if (!pending) return;
+    clearPendingTimers(pending);
+    pendingCommandRef.current = null;
+    pending.resolve(null);
+    setCancelledCommand(inFlightCommandRef.current?.command ?? null);
+    addLog('SYS', 'Stopped waiting for response. The module may still be busy - a late reply will appear as a URC.', true);
   }, [addLog]);
 
   return {
@@ -561,9 +634,14 @@ export const useDongleConnectionAT = () => {
     isReadLoopActive,
     isBootstrapping,
     isSending,
+    inFlightCommand,
+    cancelledCommand,
+    showRawRx,
+    setShowRawRx,
     isWaitingAtReady,
     startReadLoop,
     stopReadLoop,
-    sendCommand
+    sendCommand,
+    cancelCommand
   };
 };
