@@ -40,6 +40,7 @@ export interface DongleData {
   configApplied?: boolean;
   currentConfig?: NTNConfig;
   activeMode?: 0 | 1 | 2 | 3;
+  csqGpsInterval?: number;
 }
 
 export interface NTNConfig {
@@ -65,6 +66,7 @@ export interface DongleConnectionHandle {
   data: DongleData;
   applyNTNConfig: (config: NTNConfig) => Promise<boolean>;
   applyActiveMode: (mode: 0 | 1) => Promise<void>;
+  applyCsqGpsInterval: (value: number) => Promise<void>;
   isReadLoopActive: boolean;
   startReadLoop: () => Promise<void>;
   startReadLoopOnly: () => Promise<void>;
@@ -98,6 +100,8 @@ export const MODBUS_CONSTANTS = {
   ADDR_REMOTE_IP: 0xC3CA,
   ADDR_LOCAL_PORT: 0xC3D5,
   ADDR_ACTIVE_MODE: 0xC358,
+  // How often the dongle refreshes CSQ (RSRP/SINR) and GPS from the NTN module. Saved to EEPROM.
+  ADDR_CSQ_GPS_INTERVAL: 0xC35B,
   // UART passthrough switch: write 0x03 (MODE 3) to drop the dongle into direct AT command mode.
   ADDR_UART_MODE: 0xC350,
 
@@ -107,6 +111,33 @@ export const MODBUS_CONSTANTS = {
   PCIE2_MOD_START: 0xF861,
   PCIE2_DATA_LEN: 0xF460,
   PCIE2_DATA_START: 0xF461,
+};
+
+// Values accepted by ADDR_CSQ_GPS_INTERVAL; anything else returns Modbus exception 0x03.
+export const CSQ_GPS_INTERVAL_OPTIONS: { value: number; label: string }[] = [
+  { value: 0xFE, label: 'Default (~0.9 s)' },
+  { value: 1, label: '1 min' },
+  { value: 2, label: '10 min' },
+  { value: 3, label: '30 min' },
+  { value: 4, label: '60 min' },
+  { value: 0, label: 'Disabled' },
+];
+
+export const getCsqGpsIntervalLabel = (value?: number): string =>
+  CSQ_GPS_INTERVAL_OPTIONS.find(o => o.value === value)?.label ?? 'Unknown';
+
+// How often the web tool reads RSRP/SINR for a given ADDR_CSQ_GPS_INTERVAL value.
+// Reading faster than the dongle refreshes just returns the same cached value.
+// null = CSQ disabled (don't read); 0 = every poll tick (10 s).
+export const getSignalPollMs = (value?: number): number | null => {
+  switch (value) {
+    case 0: return null;
+    case 1: return 60_000;
+    case 2: return 600_000;
+    case 3: return 1_800_000;
+    case 4: return 3_600_000;
+    default: return 0;
+  }
 };
 
 // Web Serial API Type Definitions

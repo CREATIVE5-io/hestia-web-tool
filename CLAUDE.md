@@ -37,7 +37,7 @@ Browser UI → Web Serial API (native or polyfill) → Modbus RTU (CRC16) → Ha
 
 No global store. Two independent custom hooks own all hardware state:
 
-- **[hooks/useDongleConnection.ts](hooks/useDongleConnection.ts)** — NTN dongle: serial port lifecycle, read loop, Modbus request queue, device data polling (RSRP/SINR every 3 s), NTN config apply. Takes `(dongleModel, loraModule)` params.
+- **[hooks/useDongleConnection.ts](hooks/useDongleConnection.ts)** — NTN dongle: serial port lifecycle, read loop, Modbus request queue, device data polling (STATUS every 10 s, RSRP/SINR per CSQ/GPS interval, LoRa every 30 s), NTN config apply. Takes `(dongleModel, loraModule)` params.
 - **[hooks/useLoRaConnection.ts](hooks/useLoRaConnection.ts)** — LoRa module: independent serial port, PCIE2 AT command wrapper, LoRa device list (up to 16 slots).
 - **[hooks/useFirmwareUpdate.ts](hooks/useFirmwareUpdate.ts)** — Firmware update: opens its own serial port via `WebSerialAdapter` (buffered pump loop to avoid lost bytes on timeout), calls `runUpdate()` from ntnUpdate.ts.
 
@@ -72,10 +72,14 @@ Tab switching is coordinated via an **async `handleTabSwitch`** function in App.
 - `LoRaSetupProgress` — progress reporting during LoRa bulk setup
 - `MODBUS_CONSTANTS` — all register addresses as named constants
 
+### CSQ/GPS refresh interval
+
+Holding register `0xC35B` (`ADDR_CSQ_GPS_INTERVAL`, FC 0x06 write, saved to dongle EEPROM) sets how often the dongle firmware refreshes CSQ (RSRP/SINR) and GPS from the NTN module: `0`=off, `1/2/3/4`=1/10/30/60 min, `0xFE`=default ~0.9 s; other values return exception 0x03. It is read in `pollCurrentConfig` and set from `CsqGpsIntervalPanel`. `pollStatus` ticks every 10 s (`STATUS_POLL_MS`) for STATUS; A2 LoRa data is read every 30 s (`LORA_POLL_MS`); RSRP/SINR are only re-read at the rate given by `getSignalPollMs()` in [types.ts](types.ts) (never when off). The read loop also frames FC 0x06 echoes (8 B) and exception responses (5 B).
+
 ### Configuration persistence
 
 The following are saved to `localStorage` (no backend):
-- NTN config (APN, remote IP/port) — key `ntn-config`
+- NTN config (APN, remote IP/port) — key `ntn-dongle-config`
 - Serial log, LoRa log, firmware log — capped at 500 entries each
 - `DongleModel` selection — key `ntn-dongle-model`
 - `LoraModuleType` selection — key `ntn-lora-module`

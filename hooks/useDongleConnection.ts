@@ -1,12 +1,14 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { ConnectionState, LogEntry, DongleData, MODBUS_CONSTANTS, SerialPort, DriverMode, NTNConfig, PCIE2CommandResult } from '../types';
+import { ConnectionState, LogEntry, DongleData, MODBUS_CONSTANTS, SerialPort, DriverMode, NTNConfig, PCIE2CommandResult, getSignalPollMs, getCsqGpsIntervalLabel } from '../types';
 import type { DongleModel, LoraModuleType } from '../components/DongleModelPanel';
-import { buildReadInputRegisters, buildReadHoldingRegisters, buildWriteMultipleRegisters, hexString, parseModbusString, stringToModbusRegisters, atCommandToModbusRegisters, parseReadInputRegistersResponse, parseHoldingRegistersResponse } from '../utils/modbus';
+import { buildReadInputRegisters, buildReadHoldingRegisters, buildWriteMultipleRegisters, buildWriteSingleRegister, hexString, parseModbusString, stringToModbusRegisters, atCommandToModbusRegisters, parseReadInputRegistersResponse, parseHoldingRegistersResponse } from '../utils/modbus';
 // @ts-ignore - The polyfill types aren't always perfect, ignore for build safety
 import { serial as polyfillSerial } from 'web-serial-polyfill';
 
 const LOG_STORAGE_KEY = 'ntn-serial-log';
 const LOG_MAX = 500;
+const STATUS_POLL_MS = 10_000; // pollStatus tick: STATUS register every tick
+const LORA_POLL_MS = 30_000;   // A2 LoRa data, checked on each tick
 
 function loadPersistedLogs(): LogEntry[] {
   try {
@@ -51,6 +53,10 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
   const loraModuleRef = useRef<LoraModuleType>(loraModule);
   const lastExpectedResponseBytesRef = useRef<number | null>(null);
   const isPollStatusInFlightRef = useRef<boolean>(false);
+  // CSQ/GPS interval read from the dongle; drives how often pollStatus reads RSRP/SINR.
+  const csqGpsIntervalRef = useRef<number | undefined>(undefined);
+  const lastSignalPollAtRef = useRef<number>(0);
+  const lastLoraPollAtRef = useRef<number>(0);
 
   // Response queue for request/response matching - supports multiple pending requests
   const responseResolveQueueRef = useRef<Array<(data: Uint8Array) => void>>([]);
@@ -228,82 +234,83 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
         if (i+1 < dataBytes.length) registers.push((dataBytes[i] << 8) | dataBytes[i+1]);
       }
 
+      // Parse synchronously (not inside the setData updater, which React may run
+      // later) so parsedInfo is ready for the RX log line and ref side effects happen now.
       const command = lastCommandRef.current;
-      setData(prev => {
-        const newState = { ...prev, lastUpdated: Date.now() };
+      const patch: Partial<DongleData> = {};
 
-        switch(command) {
-          case 'STATUS': {
-             const val = registers[0];
-             const statusObj = {
-                moduleAtReady: (val & 0x01) > 0,
-                downlinkReady: ((val & 0x02) >> 1) > 0,
-                simReady: ((val & 0x04) >> 2) > 0,
-                networkRegistered: ((val & 0x08) >> 3) > 0,
-                socketReady: ((val & 0x10) >> 4) > 0
-             };
-             newState.status = statusObj;
-             const netStatus = val === 0x1F;
-             parsedInfo = `Status: AT=${statusObj.moduleAtReady ? 'OK' : 'NO'}, IP=${statusObj.downlinkReady ? 'OK' : 'NO'}, SIM=${statusObj.simReady ? 'OK' : 'NO'}, NET=${statusObj.networkRegistered ? 'REG' : 'NO'}, SOCK=${statusObj.socketReady ? 'OK' : 'NO'} (${netStatus ? 'ALL_READY' : 'PARTIAL'})`;
-            break;
-          }
-          case 'RSRP': {
-            const val = parseModbusString(registers);
-            newState.rsrp = val;
-            parsedInfo = `RSRP: ${val} dBm`;
-            break;
-          }
-          case 'SINR': {
-            const val = parseModbusString(registers);
-            newState.sinr = val;
-            parsedInfo = `SINR: ${val} dB`;
-            break;
-          }
-          case 'MODEL': {
-            const val = parseModbusString(registers);
-            newState.modelName = val;
-            parsedInfo = `Model: ${val}`;
-            break;
-          }
-          case 'FW': {
-            const val = parseModbusString(registers);
-            newState.fwVersion = val;
-            parsedInfo = `FW: ${val}`;
-            break;
-          }
-          case 'IMSI': {
-            const val = parseModbusString(registers);
-            newState.imsi = val;
-            parsedInfo = `IMSI: ${val}`;
-            break;
-          }
-          case 'PCIE2_LENGTH': {
-            // Extract response length from first register
-            const length = registers[0] || 0;
-            pcie2ResponseRef.current.length = length;
-            parsedInfo = `PCIE2 Response Length: ${length} bytes`;
-            break;
-          }
-          case 'PCIE2_DATA': {
-            // Store raw response data for later conversion
-            pcie2ResponseRef.current.data = dataBytes;
-            parsedInfo = `PCIE2 Response Data: ${dataBytes.length} bytes received`;
-            break;
-          }
-          case 'VERIFY_INIT': {
-             const val = parseModbusString(registers);
-             if (val && val.length > 0) {
-                unlockVerifiedRef.current = true;
-                newState.modelName = val;
-                parsedInfo = `Init Verification OK (Model: ${val})`;
-             } else {
-                parsedInfo = `Init Verification Failed`;
-             }
-             break;
-          }
+      switch(command) {
+        case 'STATUS': {
+          const val = registers[0];
+          const statusObj = {
+            moduleAtReady: (val & 0x01) > 0,
+            downlinkReady: ((val & 0x02) >> 1) > 0,
+            simReady: ((val & 0x04) >> 2) > 0,
+            networkRegistered: ((val & 0x08) >> 3) > 0,
+            socketReady: ((val & 0x10) >> 4) > 0
+          };
+          patch.status = statusObj;
+          // Only bits 0-4 are status flags; other bits (e.g. 0x40) may be set by firmware.
+          const netStatus = (val & 0x1F) === 0x1F;
+          parsedInfo = `Status: AT=${statusObj.moduleAtReady ? 'OK' : 'NO'}, IP=${statusObj.downlinkReady ? 'OK' : 'NO'}, SIM=${statusObj.simReady ? 'OK' : 'NO'}, NET=${statusObj.networkRegistered ? 'REG' : 'NO'}, SOCK=${statusObj.socketReady ? 'OK' : 'NO'} (${netStatus ? 'ALL_READY' : 'PARTIAL'})`;
+          break;
         }
-        return newState;
-      });
+        case 'RSRP': {
+          const val = parseModbusString(registers);
+          patch.rsrp = val;
+          parsedInfo = `RSRP: ${val} dBm`;
+          break;
+        }
+        case 'SINR': {
+          const val = parseModbusString(registers);
+          patch.sinr = val;
+          parsedInfo = `SINR: ${val} dB`;
+          break;
+        }
+        case 'MODEL': {
+          const val = parseModbusString(registers);
+          patch.modelName = val;
+          parsedInfo = `Model: ${val}`;
+          break;
+        }
+        case 'FW': {
+          const val = parseModbusString(registers);
+          patch.fwVersion = val;
+          parsedInfo = `FW: ${val}`;
+          break;
+        }
+        case 'IMSI': {
+          const val = parseModbusString(registers);
+          patch.imsi = val;
+          parsedInfo = `IMSI: ${val}`;
+          break;
+        }
+        case 'PCIE2_LENGTH': {
+          // Extract response length from first register
+          const length = registers[0] || 0;
+          pcie2ResponseRef.current.length = length;
+          parsedInfo = `PCIE2 Response Length: ${length} bytes`;
+          break;
+        }
+        case 'PCIE2_DATA': {
+          // Store raw response data for later conversion
+          pcie2ResponseRef.current.data = dataBytes;
+          parsedInfo = `PCIE2 Response Data: ${dataBytes.length} bytes received`;
+          break;
+        }
+        case 'VERIFY_INIT': {
+          const val = parseModbusString(registers);
+          if (val && val.length > 0) {
+            unlockVerifiedRef.current = true;
+            patch.modelName = val;
+            parsedInfo = `Init Verification OK (Model: ${val})`;
+          } else {
+            parsedInfo = `Init Verification Failed`;
+          }
+          break;
+        }
+      }
+      setData(prev => ({ ...prev, ...patch, lastUpdated: Date.now() }));
     } else if (funcCode === MODBUS_CONSTANTS.READ_HOLDING_REGISTERS) {
       parsedInfo = `Holding Reg: ${lastCommandRef.current ?? '?'}`;
     } else if (funcCode === MODBUS_CONSTANTS.WRITE_MULTIPLE_REGISTERS) {
@@ -337,8 +344,10 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
             if (funcCode === 0x04 || funcCode === 0x03) { // Read Input / Holding Registers
               const byteCount = responseBufferRef.current[2];
               expectedLength = 3 + byteCount + 2; // header + data + CRC
-            } else if (funcCode === 0x10) { // Write Multiple Registers
+            } else if (funcCode === 0x10 || funcCode === 0x06) { // Write Multiple / Single Register
               expectedLength = 8; // fixed length
+            } else if (funcCode & 0x80) { // Exception response
+              expectedLength = 5;
             }
             
             // If we have complete frame, dispatch it
@@ -449,6 +458,8 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
     addLog('SYS', 'Dongle Unlocked Successfully.');
 
     await pollStaticInfo();
+    lastSignalPollAtRef.current = 0;
+    lastLoraPollAtRef.current = 0;
     startPolling();
   };
 
@@ -563,9 +574,20 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
       const { registers, success } = parseHoldingRegistersResponse(modeResp);
       if (success && registers[0] >= 0 && registers[0] <= 3) activeMode = registers[0] as 0 | 1 | 2 | 3;
     }
+    await sleep(200);
 
-    setData(prev => ({ ...prev, currentConfig: cfg, activeMode: activeMode ?? prev.activeMode }));
-    addLog('SYS', `Device config: APN=${cfg.apn}, IP=${cfg.remoteIp}, Port=${cfg.remotePort}, LocalPort=${cfg.localPort}, ActiveMode=${activeMode ?? '?'}`);
+    // Older firmware may not have this register (exception response) — leave it unknown.
+    lastCommandRef.current = 'CONFIG_CSQ_GPS_INTERVAL';
+    let csqGpsInterval: number | undefined;
+    const csqResp = await sendModbusRequest(buildReadHoldingRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_CSQ_GPS_INTERVAL, 1));
+    if (csqResp) {
+      const { registers, success } = parseHoldingRegistersResponse(csqResp);
+      if (success && registers.length > 0) csqGpsInterval = registers[0];
+    }
+    csqGpsIntervalRef.current = csqGpsInterval;
+
+    setData(prev => ({ ...prev, currentConfig: cfg, activeMode: activeMode ?? prev.activeMode, csqGpsInterval }));
+    addLog('SYS', `Device config: APN=${cfg.apn}, IP=${cfg.remoteIp}, Port=${cfg.remotePort}, LocalPort=${cfg.localPort}, ActiveMode=${activeMode ?? '?'}, CsqGpsInterval=${csqGpsInterval !== undefined ? `0x${csqGpsInterval.toString(16).toUpperCase().padStart(2, '0')} (${getCsqGpsIntervalLabel(csqGpsInterval)})` : '?'}`);
   };
 
   const pollStatus = async () => {
@@ -584,16 +606,23 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
     try {
       lastCommandRef.current = 'STATUS';
       await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_STATUS, 1));
-      await sleep(150);
 
-      lastCommandRef.current = 'SINR';
-      await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_SINR, 2));
-      await sleep(150);
+      // Only re-read RSRP/SINR as often as the dongle refreshes them (CSQ/GPS interval).
+      const signalPollMs = getSignalPollMs(csqGpsIntervalRef.current);
+      if (signalPollMs !== null && Date.now() - lastSignalPollAtRef.current >= signalPollMs) {
+        lastSignalPollAtRef.current = Date.now();
+        await sleep(150);
 
-      lastCommandRef.current = 'RSRP';
-      await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_RSRP, 2));
+        lastCommandRef.current = 'SINR';
+        await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_SINR, 2));
+        await sleep(150);
 
-      if (dongleModelRef.current === 'A2') {
+        lastCommandRef.current = 'RSRP';
+        await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_RSRP, 2));
+      }
+
+      if (dongleModelRef.current === 'A2' && Date.now() - lastLoraPollAtRef.current >= LORA_POLL_MS) {
+        lastLoraPollAtRef.current = Date.now();
         await sleep(200);
         await pollLoraData();
       }
@@ -606,7 +635,7 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
     if (pollIntervalRef.current) window.clearInterval(pollIntervalRef.current);
     pollIntervalRef.current = window.setInterval(() => {
       if (keepReadingRef.current) pollStatus();
-    }, 3000); 
+    }, STATUS_POLL_MS);
   };
 
   const applyNTNConfig = async (config: NTNConfig): Promise<void> => {
@@ -674,6 +703,41 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
       addLog('SYS', `Active Mode set: ${mode}`);
     } catch (error) {
       addLog('SYS', `Active Mode update failed: ${error}`, true);
+      throw error;
+    } finally {
+      // Resume polling
+      startPolling();
+    }
+  };
+
+  const applyCsqGpsInterval = async (value: number): Promise<void> => {
+    if (!keepReadingRef.current || !unlockVerifiedRef.current) {
+      throw new Error('Device not ready for configuration');
+    }
+
+    // Pause polling so the bus is quiet during the write
+    if (pollIntervalRef.current) {
+      window.clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+
+    addLog('SYS', `Setting CSQ/GPS interval to ${getCsqGpsIntervalLabel(value)}...`);
+
+    try {
+      lastCommandRef.current = 'WRITE_CSQ_GPS_INTERVAL';
+      const resp = await sendModbusRequest(
+        buildWriteSingleRegister(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_CSQ_GPS_INTERVAL, value),
+        3000
+      );
+      if (!resp) throw new Error('Write timeout for CSQ/GPS interval');
+      if (resp[1] & 0x80) throw new Error(`Modbus exception 0x${resp[2].toString(16).padStart(2, '0')} (not supported by this firmware?)`);
+
+      csqGpsIntervalRef.current = value;
+      lastSignalPollAtRef.current = 0; // read RSRP/SINR on the next tick
+      setData(prev => ({ ...prev, csqGpsInterval: value }));
+      addLog('SYS', `CSQ/GPS interval set: ${getCsqGpsIntervalLabel(value)}`);
+    } catch (error) {
+      addLog('SYS', `CSQ/GPS interval update failed: ${error}`, true);
       throw error;
     } finally {
       // Resume polling
@@ -1126,6 +1190,7 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
     data,
     applyNTNConfig,
     applyActiveMode,
+    applyCsqGpsInterval,
     isReadLoopActive,
     startReadLoop,
     startReadLoopOnly,

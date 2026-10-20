@@ -1,11 +1,12 @@
 import React, { useState, useRef } from 'react';
 import { useDongleConnection } from './hooks/useDongleConnection';
-import { ConnectionState, DriverMode } from './types';
+import { ConnectionState, DriverMode, getCsqGpsIntervalLabel } from './types';
 import { DashboardCard } from './components/DashboardCard';
 import { StatusBadge } from './components/StatusBadge';
 import { LogViewer } from './components/LogViewer';
 import { ConfigPanel } from './components/ConfigPanel';
 import { ActiveModePanel } from './components/ActiveModePanel';
+import { CsqGpsIntervalPanel } from './components/CsqGpsIntervalPanel';
 import { LoRaConfig } from './components/LoRaConfig';
 import { FirmwareUpdate } from './components/FirmwareUpdate';
 import { NtnDongleAT } from './components/NtnDongleAT';
@@ -28,7 +29,7 @@ const App: React.FC = () => {
   const [dongleModel, setDongleModel] = useState<DongleModel>(loadSavedModel);
   const [loraModule, setLoraModule] = useState<LoraModuleType>(loadSavedLoraModule);
   const dongleConn = useDongleConnection(dongleModel, loraModule);
-  const { connectionState, connect, disconnect, logs, clearLogs, data, applyNTNConfig, applyActiveMode, isReadLoopActive, startReadLoop, stopReadLoop } = dongleConn;
+  const { connectionState, connect, disconnect, logs, clearLogs, data, applyNTNConfig, applyActiveMode, applyCsqGpsInterval, isReadLoopActive, startReadLoop, stopReadLoop } = dongleConn;
   const [driverMode, setDriverMode] = useState<DriverMode>(DriverMode.AUTO);
   const [activeTab, setActiveTab] = useState<Tab>('ntn');
   const loraDisconnectRef = useRef<(() => Promise<void>) | null>(null);
@@ -37,6 +38,8 @@ const App: React.FC = () => {
   const [isFwUpdating, setIsFwUpdating] = useState(false);
 
   const isConnected = connectionState === ConnectionState.CONNECTED;
+  const csqDisabled = data.csqGpsInterval === 0;
+  const signalPollLabel = csqDisabled ? 'off' : data.csqGpsInterval === undefined || data.csqGpsInterval === 0xFE ? '10s' : getCsqGpsIntervalLabel(data.csqGpsInterval);
 
   // Stop the active tab's connection before switching tabs
   const handleTabSwitch = async (tab: Tab) => {
@@ -280,6 +283,10 @@ const App: React.FC = () => {
                 <ActiveModePanel currentMode={data.activeMode} isConnected={isConnected} onApply={applyActiveMode} />
               </div>
 
+              <div className="md:col-span-2">
+                <CsqGpsIntervalPanel currentValue={data.csqGpsInterval} isConnected={isConnected} onApply={applyCsqGpsInterval} />
+              </div>
+
               <DashboardCard title="Signal Strength (RSRP)" className="h-full" accent={data.rsrp !== '--' && parseInt(data.rsrp) > -100 ? 'green' : 'blue'}>
                  <div className="flex flex-col items-center justify-center py-4">
                    <SignalIcon className={`w-10 h-10 mb-2 ${
@@ -288,6 +295,7 @@ const App: React.FC = () => {
                    <div className="text-3xl font-bold text-white tracking-tighter">
                      {data.rsrp} <span className="text-sm text-slate-500 font-normal">dBm</span>
                    </div>
+                   {csqDisabled && <div className="mt-1 text-xs text-orange-400">CSQ disabled</div>}
                    <div className="mt-1 text-xs text-slate-500 text-center">Reference Signal Received Power</div>
                  </div>
               </DashboardCard>
@@ -300,6 +308,7 @@ const App: React.FC = () => {
                    <div className="text-3xl font-bold text-white tracking-tighter">
                      {data.sinr} <span className="text-sm text-slate-500 font-normal">dB</span>
                    </div>
+                   {csqDisabled && <div className="mt-1 text-xs text-orange-400">CSQ disabled</div>}
                    <div className="mt-1 text-xs text-slate-500 text-center">Signal-to-Interference-plus-Noise Ratio</div>
                  </div>
               </DashboardCard>
@@ -360,7 +369,7 @@ const App: React.FC = () => {
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
                 </span>
-                Live Polling (3s interval)
+                Live Polling (status 10s · LoRa 30s · signal {signalPollLabel})
              </span>
            ) : isConnected && activeTab === 'ntn' ? (
              <span>Serial connected - Click Connect to start communication</span>
