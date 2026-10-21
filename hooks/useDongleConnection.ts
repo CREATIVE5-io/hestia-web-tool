@@ -5,6 +5,7 @@ import type { DongleModel, LoraModuleType } from '../components/DongleModelPanel
 import { buildReadInputRegisters, buildReadHoldingRegisters, buildWriteMultipleRegisters, buildWriteSingleRegister, hexString, parseModbusString, stringToModbusRegisters, atCommandToModbusRegisters, parseReadInputRegistersResponse, parseHoldingRegistersResponse } from '../utils/modbus';
 // @ts-ignore - The polyfill types aren't always perfect, ignore for build safety
 import { serial as polyfillSerial } from 'web-serial-polyfill';
+import { getSerialUnsupportedReason } from '../utils/serialSupport';
 
 const LOG_STORAGE_KEY = 'ntn-serial-log';
 const LOG_MAX = 500;
@@ -1177,6 +1178,13 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
     const hasNative = 'serial' in navigator;
     const isSecure = window.isSecureContext;
     addLog('SYS', `Env: Secure=${isSecure}, NativeSupported=${hasNative}`);
+
+    const unsupportedReason = getSerialUnsupportedReason(mode);
+    if (unsupportedReason) {
+      addLog('SYS', unsupportedReason, true);
+      setConnectionState(ConnectionState.ERROR);
+      return;
+    }
 
     let serialAPI;
     

@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { serial as polyfillSerial } from 'web-serial-polyfill';
 import { DriverMode, type LogEntry } from '../types';
+import { getSerialUnsupportedReason } from '../utils/serialSupport';
 import {
   runUpdate,
   type IoAdapter,
@@ -145,6 +146,12 @@ export function useFirmwareUpdate() {
 
   /** Open the browser's serial port picker and store the chosen port. */
   const selectPort = async (driverMode: DriverMode): Promise<void> => {
+    const unsupportedReason = getSerialUnsupportedReason(driverMode);
+    if (unsupportedReason) {
+      setStatus('error');
+      setErrorMsg(unsupportedReason);
+      return;
+    }
     try {
       const serialAPI = getSerialAPI(driverMode);
       const port = await serialAPI.requestPort({});

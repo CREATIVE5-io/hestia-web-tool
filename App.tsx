@@ -23,9 +23,13 @@ import {
   QuestionMarkCircleIcon,
   ChartBarIcon,
   RssIcon,
+  ExclamationTriangleIcon,
 } from '@heroicons/react/24/outline';
+import { getSerialUnsupportedReason } from './utils/serialSupport';
 
 type Tab = 'ntn' | 'ntn-at' | 'lora' | 'firmware';
+
+const serialUnsupportedReason = getSerialUnsupportedReason();
 
 const App: React.FC = () => {
   const [dongleModel, setDongleModel] = useState<DongleModel>(loadSavedModel);
@@ -81,7 +85,17 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-900 text-slate-200 p-4 md:p-8 font-sans">
       <div className="max-w-7xl mx-auto space-y-6">
-        
+
+        {serialUnsupportedReason && (
+          <div role="alert" className="flex items-start gap-3 p-4 rounded-2xl border border-red-500/40 bg-red-500/10 text-red-200">
+            <ExclamationTriangleIcon className="w-6 h-6 shrink-0 text-red-400" />
+            <div>
+              <p className="font-semibold">Serial access is not available in this browser</p>
+              <p className="text-sm text-red-200/80">{serialUnsupportedReason}</p>
+            </div>
+          </div>
+        )}
+
         {/* Tab Navigation - Moved to top */}
         <div className="flex gap-2 bg-slate-800/50 p-2 rounded-2xl border border-slate-700 backdrop-blur-sm">
           <button

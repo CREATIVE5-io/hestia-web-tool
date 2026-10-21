@@ -3,6 +3,7 @@ import { LoRaConfig, LoRaDevice, EightChDevice, LoRaSetupProgress, MODBUS_CONSTA
 import { buildWriteMultipleRegisters, buildReadInputRegisters, atCommandToModbusRegisters, parseReadInputRegistersResponse } from '../utils/modbus';
 // @ts-ignore
 import { serial as polyfillSerial } from 'web-serial-polyfill';
+import { getSerialUnsupportedReason } from '../utils/serialSupport';
 
 const LOG_STORAGE_KEY = 'lora-serial-log';
 const LOG_MAX = 500;
@@ -209,6 +210,12 @@ export const useLoRaConnection = () => {
 
   // Connect to serial port
   const connect = async () => {
+    const unsupportedReason = getSerialUnsupportedReason();
+    if (unsupportedReason) {
+      addLog('SYS', unsupportedReason, true);
+      setConnectionState(ConnectionState.ERROR);
+      return;
+    }
     try {
       const serialAPI = (navigator as any).serial || polyfillSerial;
       const port = await serialAPI.requestPort();
