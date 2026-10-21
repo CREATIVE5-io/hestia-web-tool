@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { ConnectionState, LogEntry, DongleData, MODBUS_CONSTANTS, SerialPort, DriverMode, NTNConfig, PCIE2CommandResult, getSignalPollMs, getCsqGpsIntervalLabel } from '../types';
+import { hasLoraModel } from '../components/DongleModelPanel';
 import type { DongleModel, LoraModuleType } from '../components/DongleModelPanel';
 import { buildReadInputRegisters, buildReadHoldingRegisters, buildWriteMultipleRegisters, buildWriteSingleRegister, hexString, parseModbusString, stringToModbusRegisters, atCommandToModbusRegisters, parseReadInputRegistersResponse, parseHoldingRegistersResponse } from '../utils/modbus';
 // @ts-ignore - The polyfill types aren't always perfect, ignore for build safety
@@ -22,6 +23,8 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
   const [connectionState, setConnectionState] = useState<ConnectionState>(ConnectionState.DISCONNECTED);
   const [logs, setLogs] = useState<LogEntry[]>(loadPersistedLogs);
   const [isReadLoopActive, setIsReadLoopActive] = useState(false);
+  // True once initDongle has finished (unlocked, static info read, polling started)
+  const [isInitDone, setIsInitDone] = useState(false);
   const [data, setData] = useState<DongleData>({
     modelName: '--',
     fwVersion: '--',
@@ -57,6 +60,7 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
   const csqGpsIntervalRef = useRef<number | undefined>(undefined);
   const lastSignalPollAtRef = useRef<number>(0);
   const lastLoraPollAtRef = useRef<number>(0);
+  const isNtnCmdBusyRef = useRef<boolean>(false);
 
   // Response queue for request/response matching - supports multiple pending requests
   const responseResolveQueueRef = useRef<Array<(data: Uint8Array) => void>>([]);
@@ -440,6 +444,7 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
 
   const initDongle = async () => {
     unlockVerifiedRef.current = false;
+    setIsInitDone(false);
 
     const passwordOk = await setPasswordWithRetry();
     if (!passwordOk) {
@@ -461,6 +466,7 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
     lastSignalPollAtRef.current = 0;
     lastLoraPollAtRef.current = 0;
     startPolling();
+    setIsInitDone(true);
   };
 
   // Polls the STATUS register until bit 0 (Module AT Ready) AND bit 2 (SIM Ready)
@@ -621,7 +627,7 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
         await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_RSRP, 2));
       }
 
-      if (dongleModelRef.current === 'A2' && Date.now() - lastLoraPollAtRef.current >= LORA_POLL_MS) {
+      if (hasLoraModel(dongleModelRef.current) && Date.now() - lastLoraPollAtRef.current >= LORA_POLL_MS) {
         lastLoraPollAtRef.current = Date.now();
         await sleep(200);
         await pollLoraData();
@@ -742,6 +748,83 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
     } finally {
       // Resume polling
       startPolling();
+    }
+  };
+
+  // Stop the poll timer and let an in-flight pollStatus finish, so multi-step
+  // request sequences don't interleave with polling on the shared bus.
+  const runWithPollingPaused = async <T>(fn: () => Promise<T>): Promise<T> => {
+    if (pollIntervalRef.current) {
+      window.clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+    for (let i = 0; i < 50 && isPollStatusInFlightRef.current; i++) await sleep(100);
+    try {
+      return await fn();
+    } finally {
+      if (keepReadingRef.current) startPolling();
+    }
+  };
+
+  /**
+   * nRF9151 (A1+/A2+): send a command on the NTN/TN module channel (0x9C40) and
+   * wait for its reply on 0xF060 (length, registers) / 0xF061 (data).
+   * Returns the reply text, or null if none arrived within timeoutMs.
+   * The reply is always read so it doesn't linger and get picked up by the next command.
+   */
+  const sendNtnModuleCommand = async (command: string, timeoutMs: number = 5000): Promise<string | null> => {
+    if (!keepReadingRef.current || !unlockVerifiedRef.current) {
+      throw new Error('Device not ready');
+    }
+    if (isNtnCmdBusyRef.current) {
+      throw new Error('Another nRF9151 command is in progress');
+    }
+    const registers = atCommandToModbusRegisters(command);
+    if (registers.length > 123) {
+      throw new Error(`Command too long (${command.length} chars)`);
+    }
+
+    isNtnCmdBusyRef.current = true;
+    try {
+      return await runWithPollingPaused(async () => {
+        addLog('SYS', `nRF9151 CMD: ${command}`);
+        lastCommandRef.current = 'NTN_CMD';
+        const writeResp = await sendModbusRequest(
+          buildWriteMultipleRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_NTN_CMD, registers),
+          3000
+        );
+        if (!writeResp) throw new Error(`Write timeout for ${command}`);
+        if (writeResp[1] & 0x80) throw new Error(`Modbus exception 0x${writeResp[2].toString(16).padStart(2, '0')} for ${command}`);
+
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline && keepReadingRef.current) {
+          await sleep(500);
+          lastCommandRef.current = 'NTN_REPLY_LEN';
+          const lenResp = await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_NTN_REPLY_LEN, 1));
+          if (!lenResp) continue;
+          const lenParsed = parseReadInputRegistersResponse(lenResp);
+          const replyLen = lenParsed.success ? lenParsed.registers[0] ?? 0 : 0;
+          if (replyLen === 0) continue;
+
+          await sleep(100);
+          // FC 0x04 reads at most 125 registers
+          const count = Math.min(replyLen, 125);
+          lastCommandRef.current = 'NTN_REPLY_DATA';
+          const dataResp = await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_NTN_REPLY_DATA, count));
+          if (!dataResp) throw new Error(`Reply data read timeout for ${command}`);
+          const dataParsed = parseReadInputRegistersResponse(dataResp);
+          if (!dataParsed.success) throw new Error(`Invalid reply data for ${command}`);
+
+          const bytes = dataParsed.registers.flatMap(r => [(r >> 8) & 0xFF, r & 0xFF]);
+          const reply = new TextDecoder().decode(Uint8Array.from(bytes)).replace(/\0+$/, '');
+          addLog('SYS', `nRF9151 reply (${command}): ${JSON.stringify(reply)}${replyLen > count ? ` (truncated: ${replyLen} regs)` : ''}`);
+          return reply;
+        }
+        addLog('SYS', `nRF9151 CMD: no reply to ${command} within ${timeoutMs / 1000}s`, true);
+        return null;
+      });
+    } finally {
+      isNtnCmdBusyRef.current = false;
     }
   };
 
@@ -1060,6 +1143,7 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
 
     keepReadingRef.current = false;
     setIsReadLoopActive(false);
+    setIsInitDone(false);
     addLog('SYS', 'Stopping read loop...');
 
     if (pollIntervalRef.current) {
@@ -1191,7 +1275,9 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
     applyNTNConfig,
     applyActiveMode,
     applyCsqGpsInterval,
+    sendNtnModuleCommand,
     isReadLoopActive,
+    isDeviceReady: isReadLoopActive && isInitDone,
     startReadLoop,
     startReadLoopOnly,
     stopReadLoop,

@@ -1,7 +1,12 @@
 import React from 'react';
 import { CpuChipIcon } from '@heroicons/react/24/outline';
 
-export type DongleModel = 'A1' | 'A2';
+// A1+/A2+ use the Nordic nRF9151 modem; A2/A2+ carry a LoRa module.
+export type DongleModel = 'A1' | 'A2' | 'A1+' | 'A2+';
+const DONGLE_MODELS: DongleModel[] = ['A1', 'A2', 'A1+', 'A2+'];
+
+export const isNordicModel = (m: DongleModel): boolean => m === 'A1+' || m === 'A2+';
+export const hasLoraModel = (m: DongleModel): boolean => m === 'A2' || m === 'A2+';
 export type LoraModuleType = 'single-ch' | '8-ch';
 
 const MODEL_STORAGE_KEY = 'ntn-dongle-model';
@@ -9,7 +14,7 @@ const LORA_MODULE_STORAGE_KEY = 'ntn-lora-module';
 
 export function loadSavedModel(): DongleModel {
   const saved = localStorage.getItem(MODEL_STORAGE_KEY);
-  return saved === 'A1' || saved === 'A2' ? saved : 'A1';
+  return DONGLE_MODELS.includes(saved as DongleModel) ? saved as DongleModel : 'A1';
 }
 
 export function loadSavedLoraModule(): LoraModuleType {
@@ -38,7 +43,7 @@ export const DongleModelPanel: React.FC<DongleModelPanelProps> = ({ model, onCha
     onLoraModuleChange(m);
   };
 
-  const loraDisabledByModel = model === 'A1';
+  const loraDisabledByModel = !hasLoraModel(model);
   const loraDisabled = disabled || loraDisabledByModel;
 
   return (
@@ -57,7 +62,7 @@ export const DongleModelPanel: React.FC<DongleModelPanelProps> = ({ model, onCha
       <div className="mb-3">
         <div className={`text-xs mb-1.5 font-medium uppercase tracking-wider ${disabled ? 'text-slate-600' : 'text-slate-500'}`}>NTN Dongle</div>
         <div className={`flex gap-2 p-1 rounded-lg border ${disabled ? 'bg-slate-900/50 border-slate-700/50' : 'bg-slate-900 border-slate-700'}`}>
-          {(['A1', 'A2'] as DongleModel[]).map((m) => (
+          {DONGLE_MODELS.map((m) => (
             <button
               key={m}
               onClick={() => handleModelChange(m)}
@@ -109,7 +114,10 @@ export const DongleModelPanel: React.FC<DongleModelPanelProps> = ({ model, onCha
 
       <p className="text-xs text-slate-500 mt-2 text-center">
         Selected: <span className="text-blue-400 font-semibold">{model}</span>
-        {model === 'A2' && (
+        {isNordicModel(model) && (
+          <span className="text-cyan-400 font-semibold"> · nRF9151</span>
+        )}
+        {hasLoraModel(model) && (
           <span className="text-purple-400 font-semibold"> · {loraModule === '8-ch' ? '8 CHs' : 'Single CH'}</span>
         )}
       </p>

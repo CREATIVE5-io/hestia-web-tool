@@ -67,7 +67,9 @@ export interface DongleConnectionHandle {
   applyNTNConfig: (config: NTNConfig) => Promise<boolean>;
   applyActiveMode: (mode: 0 | 1) => Promise<void>;
   applyCsqGpsInterval: (value: number) => Promise<void>;
+  sendNtnModuleCommand: (command: string, timeoutMs?: number) => Promise<string | null>;
   isReadLoopActive: boolean;
+  isDeviceReady: boolean;
   startReadLoop: () => Promise<void>;
   startReadLoopOnly: () => Promise<void>;
   stopReadLoop: () => void;
@@ -104,6 +106,12 @@ export const MODBUS_CONSTANTS = {
   ADDR_CSQ_GPS_INTERVAL: 0xC35B,
   // UART passthrough switch: write 0x03 (MODE 3) to drop the dongle into direct AT command mode.
   ADDR_UART_MODE: 0xC350,
+
+  // nRF9151 (A1+/A2+) NTN/TN module command channel: write ASCII + CRLF to ADDR_NTN_CMD,
+  // then poll the reply length (registers) and read the reply data.
+  ADDR_NTN_CMD: 0x9C40,
+  ADDR_NTN_REPLY_LEN: 0xF060,
+  ADDR_NTN_REPLY_DATA: 0xF061,
 
   // PCIE2 CMD Addresses
   PCIE2_CMD_START: 0xC700,

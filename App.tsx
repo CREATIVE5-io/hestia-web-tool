@@ -7,10 +7,12 @@ import { LogViewer } from './components/LogViewer';
 import { ConfigPanel } from './components/ConfigPanel';
 import { ActiveModePanel } from './components/ActiveModePanel';
 import { CsqGpsIntervalPanel } from './components/CsqGpsIntervalPanel';
+import { CollapsibleSection } from './components/CollapsibleSection';
 import { LoRaConfig } from './components/LoRaConfig';
 import { FirmwareUpdate } from './components/FirmwareUpdate';
 import { NtnDongleAT } from './components/NtnDongleAT';
-import { DongleModelPanel, loadSavedModel, loadSavedLoraModule } from './components/DongleModelPanel';
+import { DongleModelPanel, loadSavedModel, loadSavedLoraModule, isNordicModel, hasLoraModel } from './components/DongleModelPanel';
+import { NordicPanel } from './components/NordicPanel';
 import type { DongleModel, LoraModuleType } from './components/DongleModelPanel';
 import {
   SignalIcon,
@@ -29,7 +31,7 @@ const App: React.FC = () => {
   const [dongleModel, setDongleModel] = useState<DongleModel>(loadSavedModel);
   const [loraModule, setLoraModule] = useState<LoraModuleType>(loadSavedLoraModule);
   const dongleConn = useDongleConnection(dongleModel, loraModule);
-  const { connectionState, connect, disconnect, logs, clearLogs, data, applyNTNConfig, applyActiveMode, applyCsqGpsInterval, isReadLoopActive, startReadLoop, stopReadLoop } = dongleConn;
+  const { connectionState, connect, disconnect, logs, clearLogs, data, applyNTNConfig, applyActiveMode, applyCsqGpsInterval, sendNtnModuleCommand, isReadLoopActive, isDeviceReady, startReadLoop, stopReadLoop } = dongleConn;
   const [driverMode, setDriverMode] = useState<DriverMode>(DriverMode.AUTO);
   const [activeTab, setActiveTab] = useState<Tab>('ntn');
   const loraDisconnectRef = useRef<(() => Promise<void>) | null>(null);
@@ -213,6 +215,23 @@ const App: React.FC = () => {
           </div>
         )}
 
+        {/* Device Settings - rarely changed, collapsed by default */}
+        {activeTab === 'ntn' && (
+          <CollapsibleSection
+            title="Device Settings"
+            summary={<>
+              Active Mode: <span className="font-mono text-slate-200">{data.activeMode !== undefined ? `MODE ${data.activeMode}` : '--'}</span>
+              <span className="mx-2 text-slate-600">·</span>
+              CSQ/GPS: <span className="font-mono text-slate-200">{getCsqGpsIntervalLabel(data.csqGpsInterval)}</span>
+            </>}
+          >
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <ActiveModePanel currentMode={data.activeMode} isConnected={isConnected} onApply={applyActiveMode} />
+              <CsqGpsIntervalPanel currentValue={data.csqGpsInterval} isConnected={isConnected} onApply={applyCsqGpsInterval} />
+            </div>
+          </CollapsibleSection>
+        )}
+
         {/* NTN Dongle Tab Content */}
         {activeTab === 'ntn' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-6">
@@ -279,14 +298,6 @@ const App: React.FC = () => {
 
             {/* Column 3-4: Signal Metrics */}
             <div className="xl:col-span-2 lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6 h-fit">
-              <div className="md:col-span-2">
-                <ActiveModePanel currentMode={data.activeMode} isConnected={isConnected} onApply={applyActiveMode} />
-              </div>
-
-              <div className="md:col-span-2">
-                <CsqGpsIntervalPanel currentValue={data.csqGpsInterval} isConnected={isConnected} onApply={applyCsqGpsInterval} />
-              </div>
-
               <DashboardCard title="Signal Strength (RSRP)" className="h-full" accent={data.rsrp !== '--' && parseInt(data.rsrp) > -100 ? 'green' : 'blue'}>
                  <div className="flex flex-col items-center justify-center py-4">
                    <SignalIcon className={`w-10 h-10 mb-2 ${
@@ -313,8 +324,8 @@ const App: React.FC = () => {
                  </div>
               </DashboardCard>
 
-              {/* LoRa Data (A2 only) */}
-              {dongleModel === 'A2' && (
+              {/* LoRa Data (A2 / A2+) */}
+              {hasLoraModel(dongleModel) && (
                 <div className="md:col-span-2">
                   <DashboardCard title="LoRa DATA" accent="blue" noUppercase>
                     <div className="flex items-start gap-2">
@@ -339,6 +350,13 @@ const App: React.FC = () => {
                 <LogViewer logs={logs} onClear={clearLogs} />
               </div>
             </div>
+
+            {/* nRF9151 features (A1+ / A2+): full-width row */}
+            {isNordicModel(dongleModel) && (
+              <div className="lg:col-span-2 xl:col-span-4">
+                <NordicPanel isReady={isConnected && isDeviceReady} sendCommand={sendNtnModuleCommand} />
+              </div>
+            )}
           </div>
         )}
 

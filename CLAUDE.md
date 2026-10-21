@@ -28,9 +28,10 @@ Browser UI → Web Serial API (native or polyfill) → Modbus RTU (CRC16) → Ha
 
 ### Hardware model variants
 
-`DongleModel` (`'A1' | 'A2'`) and `LoraModuleType` (`'single-ch' | '8-ch'`) are selected in [components/DongleModelPanel.tsx](components/DongleModelPanel.tsx) and persisted to `localStorage`. Both are passed as parameters to `useDongleConnection(dongleModel, loraModule)`.
+`DongleModel` (`'A1' | 'A2' | 'A1+' | 'A2+'`) and `LoraModuleType` (`'single-ch' | '8-ch'`) are selected in [components/DongleModelPanel.tsx](components/DongleModelPanel.tsx) and persisted to `localStorage`. Both are passed as parameters to `useDongleConnection(dongleModel, loraModule)`.
 
 - **A2 mode** has a different App.tsx layout: Serial Log moves to the right column and a LoRa Data panel appears showing `AT+BISULGET` payload (8-ch) or `AT+BISGET=?` payload (single-ch).
+- **A1+ / A2+** use the Nordic nRF9151 modem. Use `isNordicModel()` / `hasLoraModel()` from DongleModelPanel.tsx instead of comparing model strings (A2+ behaves like A2 for LoRa). Nordic models show `NordicPanel` (full-width row on the NTN Dongle tab): network mode (NSTATE + SGP4/NTN/GNSS/TN triggers), modem readiness (NCHECK), auto-MO queue (MOBUF/MOCOUNT), LEO satellite config (SET_TARGET_ID + SET_TLE; TLE pasted or found by searching CelesTrak for `SATELIOT`, the only supported name) and Advanced Diagnostics (any query + raw commands). NVER and NSTATE are read on connect; the NVER provider suffix (`getFirmwareOrbit()`: `-GEO`/`-LEO`) strikes out the unavailable mode, and readiness, the MO queue and *Send to Dongle* are enabled only on LEO firmware (`leoFirmware`). All go through `sendNtnModuleCommand()` in useDongleConnection: write ASCII+CRLF to 0x9C40 (FC 0x10), then poll 0xF060 (reply length in registers) and read 0xF061, with polling paused (`runWithPollingPaused`). Pure protocol helpers (reply parsing, TLE validation) are in [utils/nrf9151.ts](utils/nrf9151.ts), ported from Hestia-sample-Python.
 - **8-ch** LoRa module uses `AT+BISULGET` instead of `AT+BISGET=?`. The `EightChDevice` type in [types.ts](types.ts) represents its device format.
 
 ### State management

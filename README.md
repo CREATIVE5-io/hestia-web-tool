@@ -19,12 +19,25 @@ npm run preview   # Preview production build locally
 
 ### NTN Dongle tab
 
+- **Dongle model** — A1, A2, A1+ or A2+ (A2/A2+ carry a LoRa module; A1+/A2+ use the Nordic nRF9151 modem). Saved to `localStorage`.
 - **Driver mode selector** — Auto Detect (tries native OS driver first, falls back to WebUSB polyfill), Native (OS CH340/CP210x driver), or Polyfill (WebUSB). Switch before connecting.
 - **NTN Configuration** — Set APN, remote IP, remote port, and local port. Config is saved to `localStorage`. After applying, unplug and replug the dongle.
 - **Device information** — Reads model name, firmware version, and IMSI from the connected dongle.
 - **NTN Dongle Status** — Tracks module AT ready, SIM ready, network registered, IP ready, and socket ready.
-- **Signal metrics** — Live RSRP (dBm) and SINR (dB) polled every 3 seconds when connected.
+- **Signal metrics** — RSRP (dBm) and SINR (dB), re-read at the dongle's CSQ/GPS refresh interval.
 - **Log viewer** — Timestamped TX/RX serial communication log with clear button.
+
+### Satellite Modem (A1+ / A2+)
+
+Shown on the NTN Dongle tab for nRF9151 models. The firmware type (GEO or LEO) is read from `NVER` on connect.
+
+- **Network Mode** — Shows the current mode (`NSTATE`) and switches between LEO, GEO, GNSS and Terrestrial. Modes the firmware can't run are struck out (no LEO on GEO firmware, no GEO on LEO firmware).
+- **Modem Readiness** — `NCHECK` checklist: provider resolved, GNSS fix, satellite orbit (TLE), NTN registered, socket open.
+- **Auto Message Queue** — Add messages (`MOBUF`), set sends per pass (`MOCOUNT`), check or clear the queue. Messages are sent on each LEO pass.
+- **LEO Satellite** — Looks up Sateliot orbit data (TLE) from CelesTrak (only `SATELIOT_<id>` satellites are supported), or accepts a pasted TLE, then sends it to the dongle (`SET_TARGET_ID` + `SET_TLE`).
+- **Advanced Diagnostics** (collapsed) — Run any modem query and send raw commands.
+
+Modem Readiness, Auto Message Queue and *Send to Dongle* are only enabled on LEO firmware.
 
 ### LoRa Configuration tab
 
