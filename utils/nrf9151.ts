@@ -20,7 +20,7 @@ export const NTN_QUERY_FIELDS: Record<NtnQueryCmd, string[] | null> = {
   NVER: ['app_version', 'zephyr', 'modem_fw', 'provider'],
   NERR: ['exit_reason', 'ceer', 'fail_cnt', 'rrc_idle'],
   NEXTPASS: ['sat', 'aos', 'tca', 'los', 'max_el'],
-  MOBUF: ['queue_depth'],
+  MOBUF: ['queue_depth', 'queue_bytes'],
   SIB32: null,
 };
 
@@ -83,6 +83,11 @@ function splitCsv(body: string): string[] {
  */
 export function parseNtnQueryReply(cmd: NtnQueryCmd, reply: string | null): NtnQueryResult {
   if (!reply) return null;
+  if (cmd === 'MOBUF') {
+    // MOBUF? replies 'MOBUF_Q:<count>/<bytes>B\r\nOK\r\n' (no '!' prefix)
+    const q = reply.match(/MOBUF_Q:\s*(\d+)\s*\/\s*(\d+)\s*B/);
+    return q ? { queue_depth: q[1], queue_bytes: q[2] } : null;
+  }
   const m = reply.match(new RegExp(`!${cmd}:\\s*(.*?)\\s*(?:\\r?\\n|$)`));
   if (!m) return null;
   const body = m[1];
