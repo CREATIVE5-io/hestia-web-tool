@@ -767,6 +767,37 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
     }
   };
 
+  // Poll 0xF060 (reply length, registers) and read 0xF061 (reply data), shared by
+  // nRF9151 commands and the uplink ACK. Returns null if nothing arrived within timeoutMs.
+  const pollNtnReply = async (label: string, timeoutMs: number): Promise<string | null> => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline && keepReadingRef.current) {
+      await sleep(500);
+      lastCommandRef.current = 'NTN_REPLY_LEN';
+      const lenResp = await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_NTN_REPLY_LEN, 1));
+      if (!lenResp) continue;
+      const lenParsed = parseReadInputRegistersResponse(lenResp);
+      const replyLen = lenParsed.success ? lenParsed.registers[0] ?? 0 : 0;
+      if (replyLen === 0) continue;
+
+      await sleep(100);
+      // FC 0x04 reads at most 125 registers
+      const count = Math.min(replyLen, 125);
+      lastCommandRef.current = 'NTN_REPLY_DATA';
+      const dataResp = await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_NTN_REPLY_DATA, count));
+      if (!dataResp) throw new Error(`Reply data read timeout for ${label}`);
+      const dataParsed = parseReadInputRegistersResponse(dataResp);
+      if (!dataParsed.success) throw new Error(`Invalid reply data for ${label}`);
+
+      const bytes = dataParsed.registers.flatMap(r => [(r >> 8) & 0xFF, r & 0xFF]);
+      const reply = new TextDecoder().decode(Uint8Array.from(bytes)).replace(/\0+$/, '');
+      addLog('SYS', `Reply (${label}): ${JSON.stringify(reply)}${replyLen > count ? ` (truncated: ${replyLen} regs)` : ''}`);
+      return reply;
+    }
+    addLog('SYS', `No reply to ${label} within ${timeoutMs / 1000}s`, true);
+    return null;
+  };
+
   /**
    * nRF9151 (A1+/A2+): send a command on the NTN/TN module channel (0x9C40) and
    * wait for its reply on 0xF060 (length, registers) / 0xF061 (data).
@@ -797,32 +828,54 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
         if (!writeResp) throw new Error(`Write timeout for ${command}`);
         if (writeResp[1] & 0x80) throw new Error(`Modbus exception 0x${writeResp[2].toString(16).padStart(2, '0')} for ${command}`);
 
-        const deadline = Date.now() + timeoutMs;
-        while (Date.now() < deadline && keepReadingRef.current) {
-          await sleep(500);
-          lastCommandRef.current = 'NTN_REPLY_LEN';
-          const lenResp = await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_NTN_REPLY_LEN, 1));
-          if (!lenResp) continue;
-          const lenParsed = parseReadInputRegistersResponse(lenResp);
-          const replyLen = lenParsed.success ? lenParsed.registers[0] ?? 0 : 0;
-          if (replyLen === 0) continue;
+        return pollNtnReply(command, timeoutMs);
+      });
+    } finally {
+      isNtnCmdBusyRef.current = false;
+    }
+  };
 
-          await sleep(100);
-          // FC 0x04 reads at most 125 registers
-          const count = Math.min(replyLen, 125);
-          lastCommandRef.current = 'NTN_REPLY_DATA';
-          const dataResp = await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_NTN_REPLY_DATA, count));
-          if (!dataResp) throw new Error(`Reply data read timeout for ${command}`);
-          const dataParsed = parseReadInputRegistersResponse(dataResp);
-          if (!dataParsed.success) throw new Error(`Invalid reply data for ${command}`);
+  /**
+   * Upload data to the cloud through the dongle (as Hestia-sample-Python --ud_data):
+   * check the uplink buffer is free (0xEA7D == 0), write the UTF-8 payload as hex
+   * text + CRLF from 0xC550 in 64-register writes, then wait for the ACK on
+   * 0xF060/0xF061. Returns the ACK text, or null if none arrived within timeoutMs.
+   */
+  const sendUplinkData = async (text: string, timeoutMs: number = 60_000): Promise<string | null> => {
+    if (!keepReadingRef.current || !unlockVerifiedRef.current) {
+      throw new Error('Device not ready');
+    }
+    // The ACK shares 0xF060/0xF061 with nRF9151 command replies
+    if (isNtnCmdBusyRef.current) {
+      throw new Error('Another command is in progress');
+    }
+    const payload = new TextEncoder().encode(text);
+    const hex = Array.from(payload, b => b.toString(16).padStart(2, '0')).join('');
+    const registers = atCommandToModbusRegisters(hex);
+    const REGS_PER_WRITE = 64; // uplink data part size (0xC550-0xC58F)
 
-          const bytes = dataParsed.registers.flatMap(r => [(r >> 8) & 0xFF, r & 0xFF]);
-          const reply = new TextDecoder().decode(Uint8Array.from(bytes)).replace(/\0+$/, '');
-          addLog('SYS', `nRF9151 reply (${command}): ${JSON.stringify(reply)}${replyLen > count ? ` (truncated: ${replyLen} regs)` : ''}`);
-          return reply;
+    isNtnCmdBusyRef.current = true;
+    try {
+      return await runWithPollingPaused(async () => {
+        lastCommandRef.current = 'UPLINK_AVAILABLE';
+        const availResp = await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_UPLINK_AVAILABLE, 1));
+        if (!availResp) throw new Error('Uplink buffer status read timeout');
+        const avail = parseReadInputRegistersResponse(availResp);
+        if (!avail.success) throw new Error('Invalid uplink buffer status response');
+        if (avail.registers[0] !== 0) throw new Error(`Uplink buffer not available (0xEA7D = ${avail.registers[0]})`);
+
+        addLog('SYS', `Uplink (${payload.length} B): ${JSON.stringify(text)}`);
+        for (let i = 0; i < registers.length; i += REGS_PER_WRITE) {
+          lastCommandRef.current = 'UPLINK_DATA';
+          const writeResp = await sendModbusRequest(
+            buildWriteMultipleRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_UPLINK_DATA + i, registers.slice(i, i + REGS_PER_WRITE)),
+            3000
+          );
+          if (!writeResp) throw new Error('Uplink data write timeout');
+          if (writeResp[1] & 0x80) throw new Error(`Modbus exception 0x${writeResp[2].toString(16).padStart(2, '0')} on uplink data write`);
         }
-        addLog('SYS', `nRF9151 CMD: no reply to ${command} within ${timeoutMs / 1000}s`, true);
-        return null;
+
+        return pollNtnReply('uplink', timeoutMs);
       });
     } finally {
       isNtnCmdBusyRef.current = false;
@@ -1284,6 +1337,7 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
     applyActiveMode,
     applyCsqGpsInterval,
     sendNtnModuleCommand,
+    sendUplinkData,
     isReadLoopActive,
     isDeviceReady: isReadLoopActive && isInitDone,
     startReadLoop,

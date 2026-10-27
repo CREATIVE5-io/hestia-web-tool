@@ -14,6 +14,7 @@ import { FirmwareUpdate9151 } from './components/FirmwareUpdate9151';
 import { NtnDongleAT } from './components/NtnDongleAT';
 import { DongleModelPanel, loadSavedModel, loadSavedLoraModule, isNordicModel, hasLoraModel } from './components/DongleModelPanel';
 import { NordicPanel } from './components/NordicPanel';
+import { UplinkPanel } from './components/UplinkPanel';
 import type { DongleModel, LoraModuleType } from './components/DongleModelPanel';
 import {
   SignalIcon,
@@ -36,7 +37,7 @@ const App: React.FC = () => {
   const [dongleModel, setDongleModel] = useState<DongleModel>(loadSavedModel);
   const [loraModule, setLoraModule] = useState<LoraModuleType>(loadSavedLoraModule);
   const dongleConn = useDongleConnection(dongleModel, loraModule);
-  const { connectionState, connect, disconnect, logs, clearLogs, data, applyNTNConfig, applyActiveMode, applyCsqGpsInterval, sendNtnModuleCommand, isReadLoopActive, isDeviceReady, startReadLoop, stopReadLoop } = dongleConn;
+  const { connectionState, connect, disconnect, logs, clearLogs, data, applyNTNConfig, applyActiveMode, applyCsqGpsInterval, sendNtnModuleCommand, sendUplinkData, isReadLoopActive, isDeviceReady, startReadLoop, stopReadLoop } = dongleConn;
   const [driverMode, setDriverMode] = useState<DriverMode>(DriverMode.AUTO);
   const [activeTab, setActiveTab] = useState<Tab>('ntn');
   const loraDisconnectRef = useRef<(() => Promise<void>) | null>(null);
@@ -380,6 +381,11 @@ const App: React.FC = () => {
               <div className="md:col-span-2 h-80">
                 <LogViewer logs={logs} onClear={clearLogs} />
               </div>
+            </div>
+
+            {/* Data Upload: full-width row */}
+            <div className="lg:col-span-2 xl:col-span-4">
+              <UplinkPanel isReady={isConnected && isDeviceReady} sendUplink={sendUplinkData} />
             </div>
 
             {/* nRF9151 features (A1+ / A2+): full-width row */}

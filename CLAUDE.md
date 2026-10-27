@@ -26,6 +26,10 @@ Browser UI → Web Serial API (native or polyfill) → Modbus RTU (CRC16) → Ha
 - **Modbus RTU** encoding/decoding: [utils/modbus.ts](utils/modbus.ts) (`buildReadInputRegisters`, `buildWriteMultipleRegisters`, `parseMbResponse`, `crc16`)
 - **MDFU firmware update**: [utils/ntnUpdate.ts](utils/ntnUpdate.ts) orchestrates two phases; [utils/mdfu.ts](utils/mdfu.ts) holds pure MDFU protocol functions (ported from pymdfu); [utils/mdfuTransport.ts](utils/mdfuTransport.ts) handles UART framing (`encodeFrame`, `decodeFrame`)
 
+### Data upload
+
+`UplinkPanel` (full-width row above the Satellite Modem panel on the NTN Dongle tab) calls `sendUplinkData()` in useDongleConnection, ported from Hestia-sample-Python `--ud_data`: check 0xEA7D == 0 (uplink buffer free), write the UTF-8 payload as hex text + CRLF from 0xC550 (64 registers per FC 0x10 write), then wait up to 60 s for the ACK on 0xF060/0xF061 (`pollNtnReply()`, shared with `sendNtnModuleCommand()`), with polling paused.
+
 ### Hardware model variants
 
 `DongleModel` (`'A1' | 'A2' | 'A1+' | 'A2+'`) and `LoraModuleType` (`'single-ch' | '8-ch'`) are selected in [components/DongleModelPanel.tsx](components/DongleModelPanel.tsx) and persisted to `localStorage`. Both are passed as parameters to `useDongleConnection(dongleModel, loraModule)`.

@@ -68,6 +68,7 @@ export interface DongleConnectionHandle {
   applyActiveMode: (mode: 0 | 1) => Promise<void>;
   applyCsqGpsInterval: (value: number) => Promise<void>;
   sendNtnModuleCommand: (command: string, timeoutMs?: number) => Promise<string | null>;
+  sendUplinkData: (text: string, timeoutMs?: number) => Promise<string | null>;
   isReadLoopActive: boolean;
   isDeviceReady: boolean;
   startReadLoop: () => Promise<void>;
@@ -112,6 +113,12 @@ export const MODBUS_CONSTANTS = {
   ADDR_NTN_CMD: 0x9C40,
   ADDR_NTN_REPLY_LEN: 0xF060,
   ADDR_NTN_REPLY_DATA: 0xF061,
+
+  // Uplink to the cloud: write the payload as hex text + CRLF from ADDR_UPLINK_DATA (64 registers
+  // per write); the ACK comes back on ADDR_NTN_REPLY_LEN / ADDR_NTN_REPLY_DATA.
+  // ADDR_UPLINK_AVAILABLE reads 0 when the uplink buffer is free.
+  ADDR_UPLINK_DATA: 0xC550,
+  ADDR_UPLINK_AVAILABLE: 0xEA7D,
 
   // PCIE2 CMD Addresses
   PCIE2_CMD_START: 0xC700,
