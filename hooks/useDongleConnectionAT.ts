@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { ConnectionState, LogEntry, SerialPort, DriverMode, MODBUS_CONSTANTS } from '../types';
-import { buildWriteMultipleRegisters, buildWriteSingleRegister, hexString } from '../utils/modbus';
+import { buildWriteMultipleRegisters, buildWriteSingleRegister, hexString, MODBUS_MODE_SEQUENCE } from '../utils/modbus';
 import { encodeATCommand, splitLines, detectTerminator, readRawWithTimeout, formatRawBytes, getATCommandTimeoutMs, getATResultTag, DEFAULT_AT_TIMEOUT_MS } from '../utils/atProtocol';
 // @ts-ignore - The polyfill types aren't always perfect, ignore for build safety
 import { serial as polyfillSerial } from 'web-serial-polyfill';
@@ -67,6 +67,9 @@ export const useDongleConnectionAT = () => {
   const keepReadingRef = useRef<boolean>(false);
   const readLoopPromiseRef = useRef<Promise<void> | null>(null);
   const isClosingRef = useRef<boolean>(false);
+  // Set once the dongle is known to be in UART passthrough (switched by us or
+  // found already there); switchToModbusMode() then returns it to Modbus mode.
+  const inPassthroughRef = useRef<boolean>(false);
 
   const lineRemainderRef = useRef<string>('');
   const pendingCommandRef = useRef<PendingCommand | null>(null);
@@ -417,6 +420,7 @@ export const useDongleConnectionAT = () => {
       setConnectionState(ConnectionState.ERROR);
       return;
     }
+    inPassthroughRef.current = true;
 
     await sleep(400);
     try {
@@ -453,6 +457,20 @@ export const useDongleConnectionAT = () => {
     }
   }, [connectionState, isReadLoopActive, addLog]);
 
+  // Reads refs only: disconnect() is also called on tab leave through the
+  // function App.tsx registered at mount, where component state is stale.
+  const switchToModbusMode = async () => {
+    if (!inPassthroughRef.current || !portRef.current?.writable) return;
+    addLog('TX', `[UART] Switch to Modbus mode: ${hexString(MODBUS_MODE_SEQUENCE)}`);
+    try {
+      await writeRawBytes(MODBUS_MODE_SEQUENCE);
+      await sleep(200);
+      inPassthroughRef.current = false;
+    } catch (e) {
+      addLog('SYS', `Failed to switch back to Modbus mode: ${e instanceof Error ? e.message : String(e)}`, true);
+    }
+  };
+
   const stopReadLoop = async () => {
     if (!isReadLoopActive) {
       addLog('SYS', 'AT session not active');
@@ -486,10 +504,14 @@ export const useDongleConnectionAT = () => {
       }
       readLoopPromiseRef.current = null;
     }
+
+    await switchToModbusMode();
   };
 
   const disconnect = async () => {
     addLog('SYS', 'Disconnecting...');
+
+    await switchToModbusMode();
 
     if (isReadLoopActive) {
       await stopReadLoop();
@@ -503,6 +525,8 @@ export const useDongleConnectionAT = () => {
 
   const connect = async (mode: DriverMode) => {
     await cleanupResources();
+    // Unknown until the AT session is started on this port
+    inPassthroughRef.current = false;
 
     addLog('SYS', `Initiating Connection... Mode: ${mode}`);
     const hasNative = 'serial' in navigator;

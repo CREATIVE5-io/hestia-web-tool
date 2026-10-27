@@ -14,7 +14,7 @@
  *      dongle answers again.
  */
 
-import { buildWriteMultipleRegisters, buildWriteSingleRegister, hexString } from './modbus';
+import { buildWriteMultipleRegisters, buildWriteSingleRegister, hexString, MODBUS_MODE_SEQUENCE } from './modbus';
 import { encodeATCommand, splitLines, detectTerminator } from './atProtocol';
 import { MODBUS_CONSTANTS } from '../types';
 import type { IoAdapter, LogDirection } from './ntnUpdate';
@@ -61,8 +61,6 @@ const PASSWORD_REGISTERS = [0, 0, 0, 0];
 // The modem may still be booting right after the switch: retry AT (see useDongleConnectionAT)
 const AT_READY_ATTEMPTS = 40;
 const AT_READY_INTERVAL_MS = 2000;
-// Raw bytes that make the dongle leave UART passthrough and return to Modbus mode
-const MODBUS_MODE_SEQUENCE = new Uint8Array([0x01, 0x02, 0x05, 0x01, 0x02]);
 const MODBUS_RETURN_WAIT_MS = 150_000;
 const MODBUS_WAIT_LOG_MS = 30_000;
 const RETURN_PASSWORD_ATTEMPTS = 3;

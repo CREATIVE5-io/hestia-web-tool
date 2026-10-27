@@ -1,3 +1,6 @@
+// Raw bytes that make the dongle leave UART passthrough and return to Modbus mode
+export const MODBUS_MODE_SEQUENCE = new Uint8Array([0x01, 0x02, 0x05, 0x01, 0x02]);
+
 // Modbus CRC16 (ANSI)
 export function calculateCRC16(buffer: Uint8Array): number {
   let crc = 0xFFFF;
