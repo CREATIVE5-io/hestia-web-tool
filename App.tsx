@@ -10,6 +10,7 @@ import { CsqGpsIntervalPanel } from './components/CsqGpsIntervalPanel';
 import { CollapsibleSection } from './components/CollapsibleSection';
 import { LoRaConfig } from './components/LoRaConfig';
 import { FirmwareUpdate } from './components/FirmwareUpdate';
+import { FirmwareUpdate9151 } from './components/FirmwareUpdate9151';
 import { NtnDongleAT } from './components/NtnDongleAT';
 import { DongleModelPanel, loadSavedModel, loadSavedLoraModule, isNordicModel, hasLoraModel } from './components/DongleModelPanel';
 import { NordicPanel } from './components/NordicPanel';
@@ -27,7 +28,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { getSerialUnsupportedReason } from './utils/serialSupport';
 
-type Tab = 'ntn' | 'ntn-at' | 'lora' | 'firmware';
+type Tab = 'ntn' | 'ntn-at' | 'lora' | 'firmware' | 'firmware-9151';
 
 const serialUnsupportedReason = getSerialUnsupportedReason();
 
@@ -40,6 +41,7 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('ntn');
   const loraDisconnectRef = useRef<(() => Promise<void>) | null>(null);
   const fwDisconnectRef   = useRef<(() => Promise<void>) | null>(null);
+  const fw9151DisconnectRef = useRef<(() => Promise<void>) | null>(null);
   const ntnAtDisconnectRef = useRef<(() => Promise<void>) | null>(null);
   const [isFwUpdating, setIsFwUpdating] = useState(false);
 
@@ -62,6 +64,8 @@ const App: React.FC = () => {
       await loraDisconnectRef.current();
     } else if (activeTab === 'firmware' && fwDisconnectRef.current) {
       await fwDisconnectRef.current();
+    } else if (activeTab === 'firmware-9151' && fw9151DisconnectRef.current) {
+      await fw9151DisconnectRef.current();
     }
     setActiveTab(tab);
   };
@@ -149,6 +153,19 @@ const App: React.FC = () => {
             }`}
           >
             Firmware Update
+          </button>
+          <button
+            onClick={() => handleTabSwitch('firmware-9151')}
+            disabled={isFwUpdating && activeTab !== 'firmware-9151'}
+            className={`flex-1 px-6 py-3 rounded-lg font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-800 ${
+              activeTab === 'firmware-9151'
+                ? 'bg-amber-600 text-white shadow-lg shadow-amber-500/20'
+                : isFwUpdating
+                  ? 'bg-transparent text-slate-600 cursor-not-allowed'
+                  : 'bg-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            Firmware Update - 9151
           </button>
         </div>
 
@@ -393,6 +410,15 @@ const App: React.FC = () => {
           />
         )}
 
+        {/* nRF9151 Firmware Update Tab Content */}
+        {activeTab === 'firmware-9151' && (
+          <FirmwareUpdate9151
+            driverMode={driverMode}
+            onRegisterDisconnect={(fn) => { fw9151DisconnectRef.current = fn; }}
+            onRunningChange={setIsFwUpdating}
+          />
+        )}
+
         {/* Footer */}
         <div className="text-center text-slate-600 text-sm py-4">
            {isConnected && isReadLoopActive && activeTab === 'ntn' ? (
@@ -411,8 +437,10 @@ const App: React.FC = () => {
              <span>NTN Dongle AT Mode — Modbus RTU switches the dongle into UART passthrough for direct AT commands</span>
            ) : activeTab === 'lora' ? (
              <span>LoRa Configuration Interface - Configure your LoRa dongle and devices</span>
-           ) : (
+           ) : activeTab === 'firmware' ? (
              <span>Firmware Update — Flash NTN Dongle firmware via Web Serial</span>
+           ) : (
+             <span>Firmware Update - 9151 — Flash nRF9151 modem firmware via UART passthrough</span>
            )}
         </div>
 

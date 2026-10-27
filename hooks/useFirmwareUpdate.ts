@@ -18,7 +18,7 @@ import {
  * "lost data on timeout" problem: if read() times out, bytes that arrive
  * later are queued and returned on the next read() call.
  */
-class WebSerialAdapter implements IoAdapter {
+export class WebSerialAdapter implements IoAdapter {
   private reader: ReadableStreamDefaultReader<Uint8Array>;
   private buffer: Uint8Array[] = [];
   private waitResolver: ((data: Uint8Array) => void) | null = null;
