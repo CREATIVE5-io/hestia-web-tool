@@ -157,7 +157,7 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
     setAddDeviceError(null);
 
     if (!newDevice.id || !newDevice.nsKey || !newDevice.appKey) {
-      setAddDeviceError('Please fill in Device ID, Network Section Key, and Application Section Key');
+      setAddDeviceError('Please fill in Device ID, Network Session Key, and Application Session Key');
       return;
     }
 
@@ -167,12 +167,12 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
     }
 
     if (newDevice.nsKey.length !== 32) {
-      setAddDeviceError('Network Section Key must be exactly 32 characters');
+      setAddDeviceError('Network Session Key must be exactly 32 characters');
       return;
     }
 
     if (newDevice.appKey.length !== 32) {
-      setAddDeviceError('Application Section Key must be exactly 32 characters');
+      setAddDeviceError('Application Session Key must be exactly 32 characters');
       return;
     }
 
@@ -554,8 +554,8 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
                   <th className="text-left py-3 px-3 font-semibold text-slate-400">Select</th>
                   <th className="text-left py-3 px-3 font-semibold text-slate-400">Index</th>
                   <th className="text-left py-3 px-3 font-semibold text-slate-400">Device ID</th>
-                  <th className="text-left py-3 px-3 font-semibold text-slate-400">Net Section Key</th>
-                  <th className="text-left py-3 px-3 font-semibold text-slate-400">App Section Key</th>
+                  <th className="text-left py-3 px-3 font-semibold text-slate-400">Net Session Key</th>
+                  <th className="text-left py-3 px-3 font-semibold text-slate-400">App Session Key</th>
                   <th className="text-left py-3 px-3 font-semibold text-slate-400">DevEUI</th>
                   <th className="text-left py-3 px-3 font-semibold text-slate-400">AppEUI</th>
                   <th className="text-left py-3 px-3 font-semibold text-slate-400">OTAA AppKey</th>
@@ -616,11 +616,11 @@ export const LoRaConfig: React.FC<LoRaConfigProps> = ({ onRegisterDisconnect }) 
               <input type="text" name="id" value={newDevice.id} onChange={handleNewDeviceChange} maxLength={8} placeholder="12345678" className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:ring-2 focus:ring-green-500" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">Network Section Key (32 characters)</label>
+              <label className="block text-sm font-medium text-slate-300 mb-2">Network Session Key (32 characters)</label>
               <input type="text" name="nsKey" value={newDevice.nsKey} onChange={handleNewDeviceChange} maxLength={32} placeholder="12345678901234567890123456789012" className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-200 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">Application Section Key (32 characters)</label>
+              <label className="block text-sm font-medium text-slate-300 mb-2">Application Session Key (32 characters)</label>
               <input type="text" name="appKey" value={newDevice.appKey} onChange={handleNewDeviceChange} maxLength={32} placeholder="12345678901234567890123456789012" className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-slate-200 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
             </div>
           </div>
