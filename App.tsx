@@ -22,6 +22,7 @@ import {
   CommandLineIcon,
   CpuChipIcon,
   FingerPrintIcon,
+  HashtagIcon,
   QuestionMarkCircleIcon,
   ChartBarIcon,
   RssIcon,
@@ -276,6 +277,15 @@ const App: React.FC = () => {
 
               <DashboardCard title="Device Information" accent="blue">
                 <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 bg-amber-600/20 rounded border border-amber-500/30">
+                      <HashtagIcon className="w-4 h-4 text-amber-400" />
+                    </div>
+                    <div>
+                      <div className="text-xs text-slate-500">Serial Number</div>
+                      <div className="font-mono text-sm text-white">{data.serialNumber}</div>
+                    </div>
+                  </div>
                   <div className="flex items-center gap-2">
                     <div className="p-1.5 bg-blue-600/20 rounded border border-blue-500/30">
                       <CpuChipIcon className="w-4 h-4 text-blue-400" />

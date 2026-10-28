@@ -29,6 +29,7 @@ export interface DongleStatus {
 }
 
 export interface DongleData {
+  serialNumber: string;
   modelName: string;
   fwVersion: string;
   imsi: string;
@@ -90,6 +91,7 @@ export const MODBUS_CONSTANTS = {
   
   // Register Addresses
   ADDR_PASSWORD: 0x0000,
+  ADDR_SN: 0xEA60,
   ADDR_MODEL_NAME: 0xEA66,
   ADDR_FW_VER: 0xEA6B,
   ADDR_STATUS: 0xEA71,

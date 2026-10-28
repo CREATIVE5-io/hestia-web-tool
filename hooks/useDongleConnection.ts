@@ -27,6 +27,7 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
   // True once initDongle has finished (unlocked, static info read, polling started)
   const [isInitDone, setIsInitDone] = useState(false);
   const [data, setData] = useState<DongleData>({
+    serialNumber: '--',
     modelName: '--',
     fwVersion: '--',
     imsi: '--',
@@ -272,6 +273,12 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
           parsedInfo = `SINR: ${val} dB`;
           break;
         }
+        case 'SN': {
+          const val = parseModbusString(registers);
+          patch.serialNumber = val;
+          parsedInfo = `SN: ${val}`;
+          break;
+        }
         case 'MODEL': {
           const val = parseModbusString(registers);
           patch.modelName = val;
@@ -499,6 +506,10 @@ export const useDongleConnection = (dongleModel: DongleModel = 'A1', loraModule:
 
   const pollStaticInfo = async () => {
     if (!keepReadingRef.current) return;
+
+    lastCommandRef.current = 'SN';
+    await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_SN, 6));
+    await sleep(200);
 
     lastCommandRef.current = 'MODEL';
     await sendModbusRequest(buildReadInputRegisters(MODBUS_CONSTANTS.SLAVE_ID, MODBUS_CONSTANTS.ADDR_MODEL_NAME, 5));
