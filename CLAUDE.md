@@ -95,6 +95,10 @@ The following are saved to `localStorage` (no backend):
 
 Tailwind CSS 3 with two custom colors in `tailwind.config.js` (`slate-850`, `slate-900`). Use `clsx` + `tailwind-merge` for conditional classes.
 
+### PWA
+
+[vite-plugin-pwa](vite.config.ts) generates `manifest.webmanifest` and a Workbox service worker that precaches the build, so the app installs and works offline. `registerType: 'prompt'`: [components/PwaUpdatePrompt.tsx](components/PwaUpdatePrompt.tsx) shows a toast and only reloads when the user clicks *Reload*, so an open serial session is never interrupted. Icons in `public/` are generated from `public/favicon.svg` with `npm run generate-pwa-assets` ([pwa-assets.config.ts](pwa-assets.config.ts)).
+
 ### Deployment
 
 `vite.config.ts` sets `base: './'` for GitHub Pages relative-path compatibility. Build output goes to `dist/`.

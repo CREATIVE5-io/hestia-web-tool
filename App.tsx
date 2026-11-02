@@ -15,6 +15,7 @@ import { NtnDongleAT } from './components/NtnDongleAT';
 import { DongleModelPanel, loadSavedModel, loadSavedLoraModule, isNordicModel, hasLoraModel } from './components/DongleModelPanel';
 import { NordicPanel } from './components/NordicPanel';
 import { UplinkPanel } from './components/UplinkPanel';
+import { PwaUpdatePrompt } from './components/PwaUpdatePrompt';
 import type { DongleModel, LoraModuleType } from './components/DongleModelPanel';
 import {
   SignalIcon,
@@ -461,6 +462,7 @@ const App: React.FC = () => {
         </div>
 
       </div>
+      <PwaUpdatePrompt />
     </div>
   );
 };
